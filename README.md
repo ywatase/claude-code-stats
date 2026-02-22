@@ -2,6 +2,8 @@
 
 A comprehensive analytics dashboard for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) usage data. Parses your local Claude Code session transcripts, calculates hypothetical API costs, and generates an interactive HTML dashboard.
 
+***Disclaimer:*** *This is an unofficial, community-built tool. Not affiliated with or endorsed by Anthropic.*
+
 ## Features
 
 - **KPI Dashboard** -- Total API-equivalent cost, messages, sessions, output tokens
