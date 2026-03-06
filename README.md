@@ -95,6 +95,38 @@ The script generates files in the `public/` directory:
 - `dashboard.html` -- Self-contained interactive dashboard (open in any browser)
 - `dashboard_data.json` -- Raw aggregated data (for custom analysis)
 
+## Context Consumption Analyzer
+
+`analyze_context.py` is a standalone CLI tool that analyzes context consumption patterns of a specific Claude Code session. It helps identify what causes context growth and compaction (context compression) events.
+
+### Usage
+
+```bash
+# List recent sessions
+python3 analyze_context.py -l
+
+# Filter sessions by project name
+python3 analyze_context.py -l -p myproject
+
+# Analyze a session by ID (prefix match supported)
+python3 analyze_context.py 0342bc92
+
+# Output as JSON
+python3 analyze_context.py SESSION_ID --json
+
+# Skip ASCII chart
+python3 analyze_context.py SESSION_ID --no-chart
+```
+
+### Report Contents
+
+- **Session overview** -- Duration, model, max context tokens, total cost, compaction count
+- **Context progression chart** -- ASCII visualization of context token growth over turns (C = compaction)
+- **Compaction events** -- Timestamp, trigger, pre/post token counts
+- **Top context growth turns** -- Which turns consumed the most context and why
+- **Tool result size ranking** -- Which tools returned the largest results
+- **Recommendations** -- Actionable suggestions to reduce context consumption
+
 ## Automation
 
 To auto-refresh the dashboard periodically:
