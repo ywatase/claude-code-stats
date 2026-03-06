@@ -24,6 +24,17 @@
     "plan": "Plan & Billing",
     "insights": "Insights"
   },
+  "period": {
+    "label": "Period",
+    "from": "From",
+    "to": "To",
+    "apply": "Apply",
+    "all": "All Time",
+    "last_7_days": "Last 7 Days",
+    "last_30_days": "Last 30 Days",
+    "this_month": "This Month",
+    "custom": "Custom"
+  },
   "costs": {
     "daily_cost": "API Value per Day by Model",
     "cumulative": "Cumulative API Value",

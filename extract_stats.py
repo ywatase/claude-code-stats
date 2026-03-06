@@ -830,7 +830,10 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
 
             model_breakdown[display_model] = {
                 "cost": round(mdata["cost"], 4),
+                "input_tokens": mdata["input_tokens"],
                 "output_tokens": mdata["output_tokens"],
+                "cache_read_tokens": mdata["cache_read_input_tokens"],
+                "cache_write_tokens": mdata["cache_creation_input_tokens"],
                 "calls": mdata["calls"],
             }
 
@@ -1016,6 +1019,7 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
         "projects": project_list,
         "sessions": session_list,
         "tool_summary": tool_summary,
+        "model_rates": PRICING,
         "insights": {
             "plans": plans or [],
             "plugins": plugins or {},
@@ -1118,6 +1122,13 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 .kpi-card.sessions .value { color:var(--blue); }
 .kpi-card.messages .value { color:var(--green); }
 .kpi-card.tokens .value { color:var(--purple); }
+
+/* Period filter */
+.period-filter { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:16px; padding:12px; background:var(--bg2); border:1px solid var(--border); border-radius:10px; }
+.period-filter .label { color:var(--text2); font-size:12px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }
+.period-filter input, .period-filter select, .period-filter button { background:var(--bg3); border:1px solid var(--border); color:var(--text); padding:7px 10px; border-radius:8px; font-size:13px; }
+.period-filter button { cursor:pointer; }
+.period-filter button:hover { background:var(--accent); border-color:var(--accent); }
 
 /* Tabs */
 .tabs { display:flex; gap:4px; margin-bottom:20px; background:var(--bg2); padding:4px; border-radius:10px; border:1px solid var(--border); }
@@ -1226,6 +1237,19 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 
 <div class="container">
   <div class="kpi-grid" id="kpiGrid"></div>
+  <div class="period-filter" id="periodFilter">
+    <span class="label">__L_period_label__</span>
+    <label>__L_period_from__ <input type="date" id="periodFrom"></label>
+    <label>__L_period_to__ <input type="date" id="periodTo"></label>
+    <select id="periodPreset">
+      <option value="all">__L_period_all__</option>
+      <option value="7d">__L_period_last_7_days__</option>
+      <option value="30d">__L_period_last_30_days__</option>
+      <option value="month">__L_period_this_month__</option>
+      <option value="custom">__L_period_custom__</option>
+    </select>
+    <button id="periodApply">__L_period_apply__</button>
+  </div>
 
   <div class="tabs" id="tabBar"></div>
 
@@ -1398,14 +1422,275 @@ const scaleDefaults = {
   y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } },
 };
 
+const chartRefs = {};
+let VIEW = null;
+let sessionPage = 0;
+const SESSION_PER_PAGE = 20;
+
+function destroyChart(id) {
+  if (chartRefs[id]) {
+    chartRefs[id].destroy();
+    delete chartRefs[id];
+  }
+}
+
+function newChart(id, cfg) {
+  destroyChart(id);
+  chartRefs[id] = new Chart(document.getElementById(id), cfg);
+}
+
+function dateOnly(iso) {
+  return (iso || '').slice(0, 10);
+}
+
+function utcDateString(dt) {
+  const y = dt.getUTCFullYear();
+  const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(dt.getUTCDate()).padStart(2, '0');
+  return y + '-' + m + '-' + d;
+}
+
+function addUtcDays(dateStr, delta) {
+  const dt = new Date(dateStr + 'T00:00:00Z');
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return utcDateString(dt);
+}
+
+function getFullRange() {
+  const dates = D.sessions.map(s => dateOnly(s.start)).filter(Boolean).sort();
+  if (dates.length === 0) return { from: '', to: '' };
+  return { from: dates[0], to: dates[dates.length - 1] };
+}
+
+function initPeriodFilter() {
+  const range = getFullRange();
+  const fromEl = document.getElementById('periodFrom');
+  const toEl = document.getElementById('periodTo');
+  const presetEl = document.getElementById('periodPreset');
+  fromEl.min = range.from; fromEl.max = range.to;
+  toEl.min = range.from; toEl.max = range.to;
+  fromEl.value = range.from;
+  toEl.value = range.to;
+  presetEl.value = 'all';
+
+  presetEl.addEventListener('change', () => {
+    const today = range.to || utcDateString(new Date());
+    if (presetEl.value === 'all') {
+      fromEl.value = range.from;
+      toEl.value = range.to;
+    } else if (presetEl.value === '7d') {
+      fromEl.value = addUtcDays(today, -6);
+      toEl.value = today;
+    } else if (presetEl.value === '30d') {
+      fromEl.value = addUtcDays(today, -29);
+      toEl.value = today;
+    } else if (presetEl.value === 'month') {
+      const dt = new Date(today + 'T00:00:00Z');
+      fromEl.value = utcDateString(new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), 1)));
+      toEl.value = today;
+    }
+  });
+
+  fromEl.addEventListener('change', () => { presetEl.value = 'custom'; });
+  toEl.addEventListener('change', () => { presetEl.value = 'custom'; });
+
+  document.getElementById('periodApply').addEventListener('click', () => {
+    sessionPage = 0;
+    renderAll();
+  });
+}
+
+function getSelectedRange() {
+  const full = getFullRange();
+  const from = document.getElementById('periodFrom').value || full.from;
+  const to = document.getElementById('periodTo').value || full.to;
+  return from <= to ? { from, to } : { from: to, to: from };
+}
+
+function estimatePlanCost(from, to) {
+  const periods = (D.plan && D.plan.periods) || [];
+  let total = 0;
+  periods.forEach(p => {
+    const overlapStart = p.start > from ? p.start : from;
+    const overlapEnd = p.end < to ? p.end : to;
+    if (overlapStart > overlapEnd) return;
+    const overlapDays = Math.floor((new Date(overlapEnd + 'T00:00:00Z') - new Date(overlapStart + 'T00:00:00Z')) / 86400000) + 1;
+    if (overlapDays > 0 && p.total_days > 0) total += p.plan_cost_usd * overlapDays / p.total_days;
+  });
+  return total;
+}
+
+function buildViewData() {
+  const { from, to } = getSelectedRange();
+  const sessions = D.sessions.filter(s => {
+    const day = dateOnly(s.start);
+    return day >= from && day <= to;
+  });
+
+  const dailyCosts = {};
+  const dailyMessages = {};
+  const dailySessions = {};
+  const hourlyMessages = {};
+  const weekdayMessages = {};
+  const projects = {};
+  const models = {};
+  const tools = {};
+
+  let totalCost = 0;
+  let totalInput = 0;
+  let totalOutput = 0;
+  let totalMessages = 0;
+
+  sessions.forEach(s => {
+    const day = dateOnly(s.start);
+    const dt = new Date(s.start);
+    const hour = dt.getUTCHours();
+    const weekday = (dt.getUTCDay() + 6) % 7;
+
+    totalCost += s.cost || 0;
+    totalInput += s.input_tokens || 0;
+    totalOutput += s.output_tokens || 0;
+    totalMessages += s.messages || 0;
+
+    dailyMessages[day] = (dailyMessages[day] || 0) + (s.messages || 0);
+    dailySessions[day] = (dailySessions[day] || 0) + 1;
+    hourlyMessages[hour] = (hourlyMessages[hour] || 0) + (s.user_messages || 0);
+    weekdayMessages[weekday] = (weekdayMessages[weekday] || 0) + (s.user_messages || 0);
+
+    const p = projects[s.project] || {
+      name: s.project, sessions: 0, messages: 0, cost: 0,
+      input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, file_size_mb: 0
+    };
+    p.sessions += 1;
+    p.messages += s.messages || 0;
+    p.cost += s.cost || 0;
+    p.input_tokens += s.input_tokens || 0;
+    p.output_tokens += s.output_tokens || 0;
+    p.cache_read_tokens += s.cache_read_tokens || 0;
+    p.cache_write_tokens += s.cache_write_tokens || 0;
+    p.file_size_mb += s.file_size_mb || 0;
+    projects[s.project] = p;
+
+    Object.entries(s.model_breakdown || {}).forEach(([model, md]) => {
+      if (!dailyCosts[day]) dailyCosts[day] = {};
+      dailyCosts[day][model] = (dailyCosts[day][model] || 0) + (md.cost || 0);
+
+      const m = models[model] || {
+        model: model, cost: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, calls: 0
+      };
+      m.cost += md.cost || 0;
+      m.input_tokens += md.input_tokens || 0;
+      m.output_tokens += md.output_tokens || 0;
+      m.cache_read_tokens += md.cache_read_tokens || 0;
+      m.cache_write_tokens += md.cache_write_tokens || 0;
+      m.calls += md.calls || 0;
+      models[model] = m;
+    });
+
+    Object.entries(s.tools || {}).forEach(([name, count]) => {
+      tools[name] = (tools[name] || 0) + count;
+    });
+  });
+
+  const allDates = Array.from(new Set(Object.keys(dailyCosts).concat(Object.keys(dailyMessages)))).sort();
+  const modelNames = Object.keys(models).sort();
+  const dailyCostSeries = [];
+  const cumulativeSeries = [];
+  let cumulative = 0;
+
+  allDates.forEach(day => {
+    const entry = { date: day };
+    let total = 0;
+    modelNames.forEach(m => {
+      const val = (dailyCosts[day] && dailyCosts[day][m]) || 0;
+      entry[m] = Math.round(val * 10000) / 10000;
+      total += val;
+    });
+    entry.total = Math.round(total * 10000) / 10000;
+    dailyCostSeries.push(entry);
+    cumulative += total;
+    cumulativeSeries.push({ date: day, cost: Math.round(cumulative * 100) / 100 });
+  });
+
+  const dailyMessageSeries = allDates.map(day => ({
+    date: day,
+    messages: dailyMessages[day] || 0,
+    sessions: dailySessions[day] || 0,
+  }));
+
+  const weekdayNames = D.locale.weekdays || ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const hourlyDist = Array.from({ length: 24 }, (_, h) => ({ hour: h, messages: hourlyMessages[h] || 0 }));
+  const weekdayDist = Array.from({ length: 7 }, (_, i) => ({ day: weekdayNames[i], messages: weekdayMessages[i] || 0 }));
+
+  const projectList = Object.values(projects).sort((a, b) => b.cost - a.cost).map(p => ({
+    ...p,
+    cost: Math.round(p.cost * 100) / 100,
+    file_size_mb: Math.round(p.file_size_mb * 10) / 10,
+  }));
+  const modelSummary = Object.values(models).sort((a, b) => b.cost - a.cost).map(m => ({
+    ...m,
+    cost: Math.round(m.cost * 100) / 100,
+  }));
+  const toolSummary = Object.entries(tools).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count }));
+
+  const costByType = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
+  modelSummary.forEach(m => {
+    const id = Object.keys(D.model_rates || {}).find(mid => D.model_rates[mid].display === m.model);
+    const rate = D.model_rates && D.model_rates[id];
+    if (!rate) return;
+    costByType.input += (m.input_tokens || 0) * rate.input / 1_000_000;
+    costByType.output += (m.output_tokens || 0) * rate.output / 1_000_000;
+    costByType.cache_read += (m.cache_read_tokens || 0) * rate.cache_read / 1_000_000;
+    costByType.cache_write += (m.cache_write_tokens || 0) * rate.cache_write_5m / 1_000_000;
+  });
+  Object.keys(costByType).forEach(k => { costByType[k] = Math.round(costByType[k] * 100) / 100; });
+
+  return {
+    range: { from, to },
+    kpi: {
+      total_cost: Math.round(totalCost * 100) / 100,
+      actual_plan_cost: Math.round(estimatePlanCost(from, to) * 100) / 100,
+      total_sessions: sessions.length,
+      total_messages: totalMessages,
+      total_output_tokens: totalOutput,
+      total_input_tokens: totalInput,
+      first_session: allDates[0] || '',
+      last_session: allDates[allDates.length - 1] || '',
+      total_projects: projectList.length,
+    },
+    daily_costs: dailyCostSeries,
+    cumulative_costs: cumulativeSeries,
+    daily_messages: dailyMessageSeries,
+    hourly_distribution: hourlyDist,
+    weekday_distribution: weekdayDist,
+    models: modelNames,
+    model_summary: modelSummary,
+    cost_by_token_type: costByType,
+    projects: projectList,
+    sessions: sessions,
+    tool_summary: toolSummary,
+  };
+}
+
+function renderAll() {
+  VIEW = buildViewData();
+  renderKPI();
+  renderCosts();
+  renderActivity();
+  renderProjects();
+  renderSessions();
+  renderInsights();
+}
+
 // ── KPI Cards ──────────────────────────────────────────────────────────
 function renderKPI() {
-  const k = D.kpi;
+  const k = VIEW.kpi;
   document.getElementById('headerMeta').textContent =
-    D.account.name + ' | ' + k.first_session + ' \u2013 ' + k.last_session +
+    D.account.name + ' | ' + VIEW.range.from + ' \u2013 ' + VIEW.range.to +
     ' | ' + D.locale.header.generated + ': ' + new Date(D.generated_at).toLocaleString(D.locale.locale_code);
 
   const grid = document.getElementById('kpiGrid');
+  grid.textContent = '';
   const cards = [
     {cls:'cost', label:D.locale.kpi.api_equivalent, value:fmtUSD(k.total_cost), sub:D.locale.kpi.api_equivalent_sub + fmtUSD(k.actual_plan_cost)},
     {cls:'messages', label:D.locale.kpi.messages, value:fmt(k.total_messages), sub:D.locale.kpi.messages_sub_prefix+k.total_sessions+D.locale.kpi.messages_sub_suffix},
@@ -1453,16 +1738,17 @@ function switchTab(name, btn) {
 
 // ── Tab 1: Costs ───────────────────────────────────────────────────────
 function renderCosts() {
-  const dates = D.daily_costs.map(d => d.date);
-  const models = D.models;
+  const dates = VIEW.daily_costs.map(d => d.date);
+  const models = VIEW.models;
+  const totalCost = VIEW.kpi.total_cost || 1;
 
-  new Chart(document.getElementById('chartDailyCost'), {
+  newChart('chartDailyCost', {
     type: 'bar',
     data: {
       labels: dates,
       datasets: models.map(m => ({
         label: m,
-        data: D.daily_costs.map(d => d[m] || 0),
+        data: VIEW.daily_costs.map(d => d[m] || 0),
         backgroundColor: MODEL_COLORS[m] || '#6b7280',
         borderRadius: 2,
       }))
@@ -1474,11 +1760,11 @@ function renderCosts() {
     }
   });
 
-  new Chart(document.getElementById('chartCumCost'), {
+  newChart('chartCumCost', {
     type: 'line',
     data: {
-      labels: D.cumulative_costs.map(d => d.date),
-      datasets: [{ label: D.locale.costs.cumulative_label, data: D.cumulative_costs.map(d => d.cost),
+      labels: VIEW.cumulative_costs.map(d => d.date),
+      datasets: [{ label: D.locale.costs.cumulative_label, data: VIEW.cumulative_costs.map(d => d.cost),
         borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', fill: true, tension: 0.3, pointRadius: 2 }]
     },
     options: { responsive: true, maintainAspectRatio: false,
@@ -1486,20 +1772,20 @@ function renderCosts() {
       scales: { x: scaleDefaults.x, y: { ...scaleDefaults.y, title: { display: true, text: 'USD', color: '#64748b' } } } }
   });
 
-  new Chart(document.getElementById('chartModelDist'), {
+  newChart('chartModelDist', {
     type: 'doughnut',
     data: {
-      labels: D.model_summary.map(m => m.model),
-      datasets: [{ data: D.model_summary.map(m => m.cost),
-        backgroundColor: D.model_summary.map(m => MODEL_COLORS[m.model] || '#6b7280'), borderWidth: 0 }]
+      labels: VIEW.model_summary.map(m => m.model),
+      datasets: [{ data: VIEW.model_summary.map(m => m.cost),
+        backgroundColor: VIEW.model_summary.map(m => MODEL_COLORS[m.model] || '#6b7280'), borderWidth: 0 }]
     },
     options: { responsive: true, maintainAspectRatio: false,
       plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', padding: 16 } },
-        tooltip: { callbacks: { label: ctx => ctx.label + ': ' + fmtUSD(ctx.raw) + ' (' + (ctx.raw / D.kpi.total_cost * 100).toFixed(1) + '%)' } } } }
+        tooltip: { callbacks: { label: ctx => ctx.label + ': ' + fmtUSD(ctx.raw) + ' (' + (ctx.raw / totalCost * 100).toFixed(1) + '%)' } } } }
   });
 
-  const cbt = D.cost_by_token_type;
-  new Chart(document.getElementById('chartTokenType'), {
+  const cbt = VIEW.cost_by_token_type;
+  newChart('chartTokenType', {
     type: 'bar',
     data: {
       labels: ['Input', 'Output', 'Cache Read', 'Cache Write'],
@@ -1513,7 +1799,8 @@ function renderCosts() {
 
   // Model table
   const tbody = document.getElementById('modelTableBody');
-  D.model_summary.forEach(m => {
+  tbody.textContent = '';
+  VIEW.model_summary.forEach(m => {
     const tr = document.createElement('tr');
     const cells = [m.model, fmtUSD(m.cost), fmtTokens(m.output_tokens), fmtTokens(m.input_tokens), fmtTokens(m.cache_read_tokens), fmt(m.calls)];
     cells.forEach((val, i) => {
@@ -1528,39 +1815,39 @@ function renderCosts() {
 
 // ── Tab 2: Activity ────────────────────────────────────────────────────
 function renderActivity() {
-  new Chart(document.getElementById('chartDailyMsgs'), {
+  newChart('chartDailyMsgs', {
     type: 'bar',
-    data: { labels: D.daily_messages.map(d => d.date),
-      datasets: [{ label: D.locale.activity.messages_label, data: D.daily_messages.map(d => d.messages), backgroundColor: '#6366f1', borderRadius: 3 }] },
+    data: { labels: VIEW.daily_messages.map(d => d.date),
+      datasets: [{ label: D.locale.activity.messages_label, data: VIEW.daily_messages.map(d => d.messages), backgroundColor: '#6366f1', borderRadius: 3 }] },
     options: { responsive: true, maintainAspectRatio: false,
       plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: scaleDefaults }
   });
 
-  const maxHourly = Math.max(...D.hourly_distribution.map(x => x.messages || 1));
-  new Chart(document.getElementById('chartHourly'), {
+  const maxHourly = Math.max(...VIEW.hourly_distribution.map(x => x.messages || 1), 1);
+  newChart('chartHourly', {
     type: 'polarArea',
-    data: { labels: D.hourly_distribution.map(h => h.hour + ':00'),
-      datasets: [{ data: D.hourly_distribution.map(h => h.messages),
-        backgroundColor: D.hourly_distribution.map(h => 'rgba(99,102,241,' + (0.3 + 0.7 * (h.messages / maxHourly)) + ')'),
+    data: { labels: VIEW.hourly_distribution.map(h => h.hour + ':00'),
+      datasets: [{ data: VIEW.hourly_distribution.map(h => h.messages),
+        backgroundColor: VIEW.hourly_distribution.map(h => 'rgba(99,102,241,' + (0.3 + 0.7 * (h.messages / maxHourly)) + ')'),
         borderWidth: 1, borderColor: '#2d3348' }] },
     options: { responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: { r: { ticks: { color: '#64748b', backdropColor: 'transparent' }, grid: { color: '#1e293b' } } } }
   });
 
-  new Chart(document.getElementById('chartWeekday'), {
+  newChart('chartWeekday', {
     type: 'bar',
-    data: { labels: D.weekday_distribution.map(d => d.day),
-      datasets: [{ label: D.locale.activity.messages_label, data: D.weekday_distribution.map(d => d.messages),
-        backgroundColor: D.weekday_distribution.map((d, i) => i >= 5 ? '#f59e0b' : '#6366f1'), borderRadius: 4 }] },
+    data: { labels: VIEW.weekday_distribution.map(d => d.day),
+      datasets: [{ label: D.locale.activity.messages_label, data: VIEW.weekday_distribution.map(d => d.messages),
+        backgroundColor: VIEW.weekday_distribution.map((d, i) => i >= 5 ? '#f59e0b' : '#6366f1'), borderRadius: 4 }] },
     options: { responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } }, scales: scaleDefaults }
   });
 
-  new Chart(document.getElementById('chartDailySessions'), {
+  newChart('chartDailySessions', {
     type: 'bar',
-    data: { labels: D.daily_messages.map(d => d.date),
-      datasets: [{ label: D.locale.activity.sessions_label, data: D.daily_messages.map(d => d.sessions), backgroundColor: '#06b6d4', borderRadius: 3 }] },
+    data: { labels: VIEW.daily_messages.map(d => d.date),
+      datasets: [{ label: D.locale.activity.sessions_label, data: VIEW.daily_messages.map(d => d.sessions), backgroundColor: '#06b6d4', borderRadius: 3 }] },
     options: { responsive: true, maintainAspectRatio: false,
       plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: scaleDefaults }
   });
@@ -1568,8 +1855,8 @@ function renderActivity() {
 
 // ── Tab 3: Projects ────────────────────────────────────────────────────
 function renderProjects() {
-  const top = D.projects.slice(0, 15);
-  new Chart(document.getElementById('chartProjectCost'), {
+  const top = VIEW.projects.slice(0, 15);
+  newChart('chartProjectCost', {
     type: 'bar',
     data: { labels: top.map(p => p.name.split('/').pop()),
       datasets: [{ label: D.locale.projects.top15_label, data: top.map(p => p.cost), backgroundColor: '#6366f1', borderRadius: 4 }] },
@@ -1582,7 +1869,7 @@ function renderProjects() {
 }
 
 function renderProjectTable(sortKey, sortDir) {
-  const sorted = [...D.projects].sort((a, b) => {
+  const sorted = [...VIEW.projects].sort((a, b) => {
     const va = a[sortKey], vb = b[sortKey];
     if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
     return sortDir === 'asc' ? va - vb : vb - va;
@@ -1610,11 +1897,8 @@ function renderProjectTable(sortKey, sortDir) {
 }
 
 // ── Tab 4: Sessions ────────────────────────────────────────────────────
-let sessionPage = 0;
-const SESSION_PER_PAGE = 20;
-
 function getFilteredSessions() {
-  let list = [...D.sessions];
+  let list = [...VIEW.sessions];
   const proj = document.getElementById('filterProject').value;
   const search = document.getElementById('filterSearch').value.toLowerCase();
   const sort = document.getElementById('filterSort').value;
@@ -1636,14 +1920,15 @@ function getFilteredSessions() {
 
 function renderSessions() {
   const sel = document.getElementById('filterProject');
-  if (sel.options.length <= 1) {
-    const projects = [...new Set(D.sessions.map(s => s.project))].sort();
-    projects.forEach(p => {
-      const o = document.createElement('option');
-      o.value = p; o.textContent = p;
-      sel.appendChild(o);
-    });
-  }
+  const currentVal = sel.value;
+  sel.innerHTML = '<option value="">'+D.locale.sessions_tab.all_projects+'</option>';
+  const projects = [...new Set(VIEW.sessions.map(s => s.project))].sort();
+  projects.forEach(p => {
+    const o = document.createElement('option');
+    o.value = p; o.textContent = p;
+    sel.appendChild(o);
+  });
+  if (projects.includes(currentVal)) sel.value = currentVal;
   renderSessionList();
 }
 
@@ -1947,9 +2232,9 @@ function renderInsights() {
   if (!ins) return;
 
   // Tool usage chart
-  const tools = (D.tool_summary || []).slice(0, 20);
+  const tools = (VIEW.tool_summary || []).slice(0, 20);
   if (tools.length > 0) {
-    new Chart(document.getElementById('chartToolUsage'), {
+    newChart('chartToolUsage', {
       type: 'bar',
       data: { labels: tools.map(t => t.name),
         datasets: [{ label: D.locale.insights.tool_calls, data: tools.map(t => t.count),
@@ -1959,13 +2244,15 @@ function renderInsights() {
         scales: { x: { ...scaleDefaults.x, title: { display: true, text: D.locale.insights.tool_calls, color: '#64748b' } },
           y: { ...scaleDefaults.y, ticks: { font: { size: 11 } } } } }
     });
+  } else {
+    destroyChart('chartToolUsage');
   }
 
   // Storage chart
   const storage = ins.storage || {};
   const storageItems = (storage.items || []).filter(s => s.size_mb >= 0.1);
   if (storageItems.length > 0) {
-    new Chart(document.getElementById('chartStorage'), {
+    newChart('chartStorage', {
       type: 'doughnut',
       data: { labels: storageItems.map(s => s.name),
         datasets: [{ data: storageItems.map(s => s.size_mb),
@@ -1974,6 +2261,8 @@ function renderInsights() {
         plugins: { legend: { position: 'right', labels: { color: '#94a3b8', padding: 8, font: { size: 11 } } },
           tooltip: { callbacks: { label: ctx => ctx.label + ': ' + ctx.raw + ' MB' } } } }
     });
+  } else {
+    destroyChart('chartStorage');
   }
 
   // Plugin table
@@ -1982,6 +2271,7 @@ function renderInsights() {
   const enabled = plugins.settings?.enabled_plugins || {};
   const mktStats = plugins.marketplace_stats || {};
   const tbody = document.getElementById('pluginTableBody');
+  tbody.textContent = '';
   installed.forEach(p => {
     const tr = document.createElement('tr');
     const isEnabled = enabled[p.name] !== false;
@@ -2011,6 +2301,7 @@ function renderInsights() {
 
   // Config info
   const configDiv = document.getElementById('configInfo');
+  configDiv.textContent = '';
   const settings = plugins.settings || {};
   const configItems = [
     {label: D.locale.insights.permission_mode, value: settings.permission_mode || '-'},
@@ -2035,6 +2326,7 @@ function renderInsights() {
   // Plans table
   const plans = ins.plans || [];
   const plansTbody = document.getElementById('plansTableBody');
+  plansTbody.textContent = '';
   plans.forEach(p => {
     const tr = document.createElement('tr');
     const cells = [
@@ -2056,6 +2348,7 @@ function renderInsights() {
   const fh = ins.file_history || {};
   const todos = ins.todos || {};
   const miscDiv = document.getElementById('miscStats');
+  miscDiv.textContent = '';
   const miscGrid = document.createElement('div'); miscGrid.className = 'misc-stat-grid';
   const miscItems = [
     {val: String(fh.total_files || 0), label: D.locale.insights.file_snapshots},
@@ -2095,13 +2388,9 @@ document.getElementById('filterSearch').addEventListener('input', () => { sessio
 
 // ── Init ───────────────────────────────────────────────────────────────
 initTabs();
-renderKPI();
-renderCosts();
-renderActivity();
-renderProjects();
-renderSessions();
+initPeriodFilter();
 renderPlan();
-renderInsights();
+renderAll();
 </script>
 </body>
 </html>'''
