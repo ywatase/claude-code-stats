@@ -24,6 +24,17 @@
     "plan": "Plan & Abrechnung",
     "insights": "Insights"
   },
+  "period": {
+    "label": "Zeitraum",
+    "from": "Von",
+    "to": "Bis",
+    "apply": "Anwenden",
+    "all": "Gesamt",
+    "last_7_days": "Letzte 7 Tage",
+    "last_30_days": "Letzte 30 Tage",
+    "this_month": "Dieser Monat",
+    "custom": "Benutzerdefiniert"
+  },
   "costs": {
     "daily_cost": "API-Wert pro Tag nach Modell",
     "cumulative": "Kumulativer API-Wert",
