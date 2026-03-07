@@ -93,6 +93,11 @@ PRICING = {
         "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.00,
         "display": "Opus 4.5"
     },
+    "claude-sonnet-4-6": {
+        "input": 3.00, "output": 15.00,
+        "cache_read": 0.30, "cache_write_5m": 3.75, "cache_write_1h": 6.00,
+        "display": "Sonnet 4.6"
+    },
     "claude-sonnet-4-5-20250929": {
         "input": 3.00, "output": 15.00,
         "cache_read": 0.30, "cache_write_5m": 3.75, "cache_write_1h": 6.00,
@@ -114,7 +119,46 @@ DEFAULT_PRICING = {
 
 
 def get_model_display(model_id):
-    return PRICING.get(model_id, DEFAULT_PRICING)["display"]
+    return get_model_pricing(model_id)["display"]
+
+
+def normalize_model_id(model_id):
+    """Normalize model ids across version/date-suffixed variants."""
+    if not isinstance(model_id, str):
+        return ""
+
+    model_id = model_id.strip()
+    if not model_id:
+        return ""
+
+    if model_id in PRICING:
+        return model_id
+
+    # Strip known provider prefix, e.g. "anthropic/claude-sonnet-4-6".
+    if "/" in model_id:
+        model_id = model_id.rsplit("/", 1)[-1]
+        if model_id in PRICING:
+            return model_id
+
+    # Normalize date-suffixed ids, e.g. "...-20250929" -> base model id.
+    base_model = re.sub(r"-\d{8}$", "", model_id)
+    if base_model in PRICING:
+        return base_model
+
+    # Normalize shorthand ids, e.g. "claude-sonnet-4-5" -> latest dated variant.
+    if base_model == "claude-sonnet-4-5":
+        return "claude-sonnet-4-5-20250929"
+    if base_model == "claude-haiku-4-5":
+        return "claude-haiku-4-5-20251001"
+    if base_model == "claude-opus-4-5":
+        return "claude-opus-4-5-20251101"
+
+    return model_id
+
+
+def get_model_pricing(model_id):
+    normalized = normalize_model_id(model_id)
+    return PRICING.get(normalized, DEFAULT_PRICING)
 
 
 def calc_cost(model_id, usage):
@@ -123,7 +167,7 @@ def calc_cost(model_id, usage):
     Uses the standard cache write rate (1.25x input price) for all cache
     creation tokens, matching Claude Code's own cost calculation.
     """
-    p = PRICING.get(model_id, DEFAULT_PRICING)
+    p = get_model_pricing(model_id)
 
     input_tokens = usage.get("input_tokens", 0)
     output_tokens = usage.get("output_tokens", 0)
@@ -596,7 +640,7 @@ def parse_session_transcripts():
                                 sess["assistant_message_count"] += 1
 
                                 message = obj.get("message", {})
-                                model = message.get("model", "unknown")
+                                model = normalize_model_id(message.get("model", "unknown"))
                                 usage = message.get("usage", {})
 
                                 if usage and usage.get("output_tokens", 0) > 0:
@@ -1410,7 +1454,7 @@ function escHtml(s) {
 
 const MODEL_COLORS = {
   'Opus 4.6': '#a855f7', 'Opus 4.5': '#7c3aed',
-  'Sonnet 4.5': '#3b82f6', 'Haiku 4.5': '#22c55e',
+  'Sonnet 4.6': '#60a5fa', 'Sonnet 4.5': '#3b82f6', 'Haiku 4.5': '#22c55e',
   'Unknown': '#6b7280'
 };
 
