@@ -26,3 +26,10 @@ dot-claude.json
 
 # Python
 __pycache__/
+
+# Node.js
+node_modules/
+
+# Playwright
+test-results/
+playwright-report/
