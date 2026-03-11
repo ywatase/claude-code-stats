@@ -24,35 +24,53 @@ HISTORY_JSONL = CLAUDE_DIR / "history.jsonl"
 # ── Pricing (USD per 1M tokens) ───────────────────────────────────────────
 PRICING = {
     "claude-opus-4-6": {
-        "input": 5.00, "output": 25.00,
-        "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.00,
+        "input": 5.00,
+        "output": 25.00,
+        "cache_read": 0.50,
+        "cache_write_5m": 6.25,
+        "cache_write_1h": 10.00,
         "display": "Opus 4.6",
     },
     "claude-opus-4-5-20251101": {
-        "input": 5.00, "output": 25.00,
-        "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.00,
+        "input": 5.00,
+        "output": 25.00,
+        "cache_read": 0.50,
+        "cache_write_5m": 6.25,
+        "cache_write_1h": 10.00,
         "display": "Opus 4.5",
     },
     "claude-sonnet-4-6": {
-        "input": 3.00, "output": 15.00,
-        "cache_read": 0.30, "cache_write_5m": 3.75, "cache_write_1h": 6.00,
+        "input": 3.00,
+        "output": 15.00,
+        "cache_read": 0.30,
+        "cache_write_5m": 3.75,
+        "cache_write_1h": 6.00,
         "display": "Sonnet 4.6",
     },
     "claude-sonnet-4-5-20250929": {
-        "input": 3.00, "output": 15.00,
-        "cache_read": 0.30, "cache_write_5m": 3.75, "cache_write_1h": 6.00,
+        "input": 3.00,
+        "output": 15.00,
+        "cache_read": 0.30,
+        "cache_write_5m": 3.75,
+        "cache_write_1h": 6.00,
         "display": "Sonnet 4.5",
     },
     "claude-haiku-4-5-20251001": {
-        "input": 1.00, "output": 5.00,
-        "cache_read": 0.10, "cache_write_5m": 1.25, "cache_write_1h": 2.00,
+        "input": 1.00,
+        "output": 5.00,
+        "cache_read": 0.10,
+        "cache_write_5m": 1.25,
+        "cache_write_1h": 2.00,
         "display": "Haiku 4.5",
     },
 }
 
 DEFAULT_PRICING = {
-    "input": 5.00, "output": 25.00,
-    "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.00,
+    "input": 5.00,
+    "output": 25.00,
+    "cache_read": 0.50,
+    "cache_write_5m": 6.25,
+    "cache_write_1h": 10.00,
     "display": "Unknown",
 }
 
@@ -89,6 +107,7 @@ def project_display_name(project_path):
 
 
 # ── Session Search ─────────────────────────────────────────────────────────
+
 
 def find_all_session_files():
     """Walk PROJECTS_DIR and return {session_id: path} mapping."""
@@ -144,7 +163,9 @@ def find_session_file(session_id):
         return all_files[session_id], session_id
 
     # 2. Prefix match
-    matches = [(sid, path) for sid, path in all_files.items() if sid.startswith(session_id)]
+    matches = [
+        (sid, path) for sid, path in all_files.items() if sid.startswith(session_id)
+    ]
     if len(matches) == 1:
         return matches[0][1], matches[0][0]
     if len(matches) > 1:
@@ -187,20 +208,23 @@ def list_recent_sessions(project_filter=None, limit=20):
             file_size = file_path.stat().st_size if file_path else None
         except OSError:
             file_size = None
-        results.append({
-            "sessionId": sid,
-            "project": proj,
-            "display_name": project_display_name(proj),
-            "timestamp": entry["timestamp"],
-            "file_path": str(file_path) if file_path else None,
-            "file_size": file_size,
-        })
+        results.append(
+            {
+                "sessionId": sid,
+                "project": proj,
+                "display_name": project_display_name(proj),
+                "timestamp": entry["timestamp"],
+                "file_path": str(file_path) if file_path else None,
+                "file_size": file_size,
+            }
+        )
         if len(results) >= limit:
             break
     return results
 
 
 # ── JSONL Parser ───────────────────────────────────────────────────────────
+
 
 def parse_session(file_path):
     """Parse a session JSONL file into structured analysis data.
@@ -272,11 +296,13 @@ def parse_session(file_path):
         # Compaction detection
         if msg_type == "system" and msg.get("subtype") == "compact_boundary":
             metadata = msg.get("compactMetadata", {})
-            compactions.append({
-                "timestamp": ts_str,
-                "trigger": metadata.get("trigger", "unknown"),
-                "pre_tokens": metadata.get("preTokens", 0),
-            })
+            compactions.append(
+                {
+                    "timestamp": ts_str,
+                    "trigger": metadata.get("trigger", "unknown"),
+                    "pre_tokens": metadata.get("preTokens", 0),
+                }
+            )
             continue
 
         # Extract tool_use blocks from assistant messages (for name mapping)
@@ -299,17 +325,22 @@ def parse_session(file_path):
                         tool_name = tool_use_map.get(tool_id, "unknown")
                         result_content = block.get("content", "")
                         if isinstance(result_content, list):
-                            size = sum(len(json.dumps(item, ensure_ascii=False)) for item in result_content)
+                            size = sum(
+                                len(json.dumps(item, ensure_ascii=False))
+                                for item in result_content
+                            )
                         elif isinstance(result_content, str):
                             size = len(result_content)
                         else:
                             size = len(str(result_content))
-                        tool_results_all.append({
-                            "tool_use_id": tool_id,
-                            "tool_name": tool_name,
-                            "size_bytes": size,
-                            "timestamp": ts_str,
-                        })
+                        tool_results_all.append(
+                            {
+                                "tool_use_id": tool_id,
+                                "tool_name": tool_name,
+                                "size_bytes": size,
+                                "timestamp": ts_str,
+                            }
+                        )
 
         # Build turns from assistant messages with usage
         if msg_type == "assistant":
@@ -337,7 +368,9 @@ def parse_session(file_path):
             if is_same_call and ts_str and current_turn:
                 try:
                     curr_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                    prev_dt = datetime.fromisoformat(current_turn["timestamp"].replace("Z", "+00:00"))
+                    prev_dt = datetime.fromisoformat(
+                        current_turn["timestamp"].replace("Z", "+00:00")
+                    )
                     if abs((curr_dt - prev_dt).total_seconds()) > 5:
                         is_same_call = False
                 except (ValueError, TypeError):
@@ -355,7 +388,9 @@ def parse_session(file_path):
                     "cache_creation": cache_creation,
                     "output_tokens": output_tokens,
                     "cost": cost,
-                    "delta_context": context_tokens - prev_context if prev_context is not None else 0,
+                    "delta_context": context_tokens - prev_context
+                    if prev_context is not None
+                    else 0,
                     "tool_results": [],  # populated later
                 }
                 turns.append(current_turn)
@@ -385,7 +420,9 @@ def parse_session(file_path):
             "display_name": project_display_name(project_path),
             "first_ts": first_ts.isoformat() if first_ts else None,
             "last_ts": last_ts.isoformat() if last_ts else None,
-            "duration_minutes": (last_ts - first_ts).total_seconds() / 60 if first_ts and last_ts else 0,
+            "duration_minutes": (last_ts - first_ts).total_seconds() / 60
+            if first_ts and last_ts
+            else 0,
             "models": sorted(models_used),
         },
     }
@@ -420,13 +457,16 @@ def _associate_tool_results_with_turns(turns, tool_results):
 
 # ── Analysis ───────────────────────────────────────────────────────────────
 
+
 def analyze_context_growth(data, top_n=10):
     """Analyze context growth and identify biggest contributors."""
     turns = data["turns"]
     tool_results = data["tool_results"]
 
     # Top N turns by delta_context
-    top_delta_turns = sorted(turns, key=lambda t: t["delta_context"], reverse=True)[:top_n]
+    top_delta_turns = sorted(turns, key=lambda t: t["delta_context"], reverse=True)[
+        :top_n
+    ]
 
     # Tool result size aggregation by tool name
     tool_stats = defaultdict(lambda: {"count": 0, "total_bytes": 0, "max_bytes": 0})
@@ -438,9 +478,13 @@ def analyze_context_growth(data, top_n=10):
         tool_stats[name]["max_bytes"] = max(tool_stats[name]["max_bytes"], size)
 
     for name, stats in tool_stats.items():
-        stats["avg_bytes"] = stats["total_bytes"] / stats["count"] if stats["count"] else 0
+        stats["avg_bytes"] = (
+            stats["total_bytes"] / stats["count"] if stats["count"] else 0
+        )
 
-    tool_ranking = sorted(tool_stats.items(), key=lambda x: x[1]["total_bytes"], reverse=True)
+    tool_ranking = sorted(
+        tool_stats.items(), key=lambda x: x[1]["total_bytes"], reverse=True
+    )
 
     return {
         "top_delta_turns": top_delta_turns,
@@ -507,7 +551,9 @@ def generate_recommendations(data, analysis):
     if len(compactions) >= 3:
         recs.append(
             "コンパクションが {count} 回発生しています。タスクを分割して"
-            "セッションを短く保つことを検討してください。".format(count=len(compactions))
+            "セッションを短く保つことを検討してください。".format(
+                count=len(compactions)
+            )
         )
 
     turns = data["turns"]
@@ -528,6 +574,7 @@ def generate_recommendations(data, analysis):
 
 
 # ── Output Formatting ──────────────────────────────────────────────────────
+
 
 def format_bytes(n):
     """Format byte count as human-readable string."""
@@ -632,7 +679,9 @@ def render_ascii_chart(turns, compactions, terminal_width=None):
 
     # Add axis
     lines.append(f"{'':>{label_width}}" + "└" + "─" * chart_width)
-    lines.append(f"{'':>{label_width}} Turn 1{' ' * (chart_width - 10)}Turn {len(turns)}")
+    lines.append(
+        f"{'':>{label_width}} Turn 1{' ' * (chart_width - 10)}Turn {len(turns)}"
+    )
 
     return "\n".join(lines)
 
@@ -656,7 +705,9 @@ def render_text_report(data, analysis, top_n=10, show_chart=True):
     lines.append(f"  期間          : {info['first_ts'] or 'N/A'}")
     lines.append(f"                  → {info['last_ts'] or 'N/A'}")
     lines.append(f"                  ({format_duration(info['duration_minutes'])})")
-    lines.append(f"  モデル        : {', '.join(get_model_display(m) for m in info['models']) or 'N/A'}")
+    lines.append(
+        f"  モデル        : {', '.join(get_model_display(m) for m in info['models']) or 'N/A'}"
+    )
     lines.append(f"  ターン数      : {len(turns)}")
 
     if turns:
@@ -696,7 +747,9 @@ def render_text_report(data, analysis, top_n=10, show_chart=True):
                     comp_dt = datetime.fromisoformat(comp_ts.replace("Z", "+00:00"))
                     for turn in turns:
                         try:
-                            t_dt = datetime.fromisoformat(turn["timestamp"].replace("Z", "+00:00"))
+                            t_dt = datetime.fromisoformat(
+                                turn["timestamp"].replace("Z", "+00:00")
+                            )
                             if t_dt > comp_dt:
                                 reduction = comp["pre_tokens"] - turn["context_tokens"]
                                 post_str = f"       → post_tokens={format_tokens(turn['context_tokens'])}"
@@ -716,8 +769,10 @@ def render_text_report(data, analysis, top_n=10, show_chart=True):
         lines.append("─" * 70)
         lines.append(f"  コンテキスト増加 Top {min(top_n, len(top_turns))}")
         lines.append("─" * 70)
-        lines.append(f"  {'#':>3s}  {'時刻':8s}  {'Delta':>8s}  {'Context':>8s}  {'原因'}")
-        lines.append(f"  {'─'*3}  {'─'*8}  {'─'*8}  {'─'*8}  {'─'*30}")
+        lines.append(
+            f"  {'#':>3s}  {'時刻':8s}  {'Delta':>8s}  {'Context':>8s}  {'原因'}"
+        )
+        lines.append(f"  {'─' * 3}  {'─' * 8}  {'─' * 8}  {'─' * 8}  {'─' * 30}")
 
         for i, turn in enumerate(top_turns[:top_n], 1):
             ts = format_timestamp(turn["timestamp"])
@@ -727,9 +782,11 @@ def render_text_report(data, analysis, top_n=10, show_chart=True):
             # Identify cause from tool results in this turn
             if turn["tool_results"]:
                 biggest = max(turn["tool_results"], key=lambda x: x["size_bytes"])
-                cause = f"{biggest['tool_name']} ({format_bytes(biggest['size_bytes'])})"
+                cause = (
+                    f"{biggest['tool_name']} ({format_bytes(biggest['size_bytes'])})"
+                )
                 if len(turn["tool_results"]) > 1:
-                    cause += f" +{len(turn['tool_results'])-1} tools"
+                    cause += f" +{len(turn['tool_results']) - 1} tools"
             else:
                 cause = "(ユーザー入力 or システム)"
 
@@ -742,8 +799,10 @@ def render_text_report(data, analysis, top_n=10, show_chart=True):
         lines.append("─" * 70)
         lines.append("  ツール結果サイズランキング")
         lines.append("─" * 70)
-        lines.append(f"  {'ツール名':<20s}  {'回数':>5s}  {'合計':>8s}  {'平均':>8s}  {'最大':>8s}")
-        lines.append(f"  {'─'*20}  {'─'*5}  {'─'*8}  {'─'*8}  {'─'*8}")
+        lines.append(
+            f"  {'ツール名':<20s}  {'回数':>5s}  {'合計':>8s}  {'平均':>8s}  {'最大':>8s}"
+        )
+        lines.append(f"  {'─' * 20}  {'─' * 5}  {'─' * 8}  {'─' * 8}  {'─' * 8}")
         for name, stats in tool_ranking:
             lines.append(
                 f"  {name:<20s}  {stats['count']:>5d}  "
@@ -775,21 +834,25 @@ def render_json_report(data, analysis, top_n=10):
     # Simplify turns for JSON output (remove tool_results detail)
     simplified_turns = []
     for t in turns:
-        simplified_turns.append({
-            "turn_number": t["turn_number"],
-            "timestamp": t["timestamp"],
-            "model": t["model"],
-            "context_tokens": t["context_tokens"],
-            "delta_context": t["delta_context"],
-            "input_tokens": t["input_tokens"],
-            "cache_read": t["cache_read"],
-            "cache_creation": t["cache_creation"],
-            "output_tokens": t["output_tokens"],
-            "cost": round(t["cost"], 6),
-            "cumulative_cost": round(t.get("cumulative_cost", 0), 6),
-            "tool_results_count": len(t["tool_results"]),
-            "tool_results_total_bytes": sum(tr["size_bytes"] for tr in t["tool_results"]),
-        })
+        simplified_turns.append(
+            {
+                "turn_number": t["turn_number"],
+                "timestamp": t["timestamp"],
+                "model": t["model"],
+                "context_tokens": t["context_tokens"],
+                "delta_context": t["delta_context"],
+                "input_tokens": t["input_tokens"],
+                "cache_read": t["cache_read"],
+                "cache_creation": t["cache_creation"],
+                "output_tokens": t["output_tokens"],
+                "cost": round(t["cost"], 6),
+                "cumulative_cost": round(t.get("cumulative_cost", 0), 6),
+                "tool_results_count": len(t["tool_results"]),
+                "tool_results_total_bytes": sum(
+                    tr["size_bytes"] for tr in t["tool_results"]
+                ),
+            }
+        )
 
     output = {
         "session_info": info,
@@ -812,8 +875,7 @@ def render_json_report(data, analysis, top_n=10):
             for t in analysis["top_delta_turns"][:top_n]
         ],
         "tool_ranking": [
-            {"tool": name, **stats}
-            for name, stats in analysis["tool_ranking"]
+            {"tool": name, **stats} for name, stats in analysis["tool_ranking"]
         ],
         "recommendations": generate_recommendations(data, analysis),
     }
@@ -823,16 +885,21 @@ def render_json_report(data, analysis, top_n=10):
 
 # ── Session List Display ───────────────────────────────────────────────────
 
+
 def _print_session_table(sessions):
     """Print formatted session table."""
     print("─" * 70)
     print("  最近のセッション一覧")
     print("─" * 70)
     print(f"  {'#':>3s}  {'日時':<20s}  {'プロジェクト':<25s}  {'サイズ':>8s}  {'ID'}")
-    print(f"  {'─'*3}  {'─'*20}  {'─'*25}  {'─'*8}  {'─'*8}")
+    print(f"  {'─' * 3}  {'─' * 20}  {'─' * 25}  {'─' * 8}  {'─' * 8}")
 
     for i, s in enumerate(sessions, 1):
-        ts = datetime.fromtimestamp(s["timestamp"] / 1000).strftime("%Y-%m-%d %H:%M") if s["timestamp"] else "N/A"
+        ts = (
+            datetime.fromtimestamp(s["timestamp"] / 1000).strftime("%Y-%m-%d %H:%M")
+            if s["timestamp"]
+            else "N/A"
+        )
         proj = s["display_name"][:25]
         size = format_bytes(s["file_size"]) if s["file_size"] else "N/A"
         sid_short = s["sessionId"][:8]
@@ -877,6 +944,7 @@ def display_session_list(sessions, interactive=True):
 
 # ── CLI Entry Point ────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Claude Code セッションのコンテキスト消費パターンを分析する",
@@ -889,27 +957,39 @@ def main():
 """,
     )
     parser.add_argument(
-        "session_id", nargs="?", default=None,
+        "session_id",
+        nargs="?",
+        default=None,
         help="セッション ID（UUID）またはスラッグ（前方一致）",
     )
     parser.add_argument(
-        "-l", "--list", action="store_true",
+        "-l",
+        "--list",
+        action="store_true",
         help="最近のセッション一覧を表示",
     )
     parser.add_argument(
-        "-p", "--project", default=None,
+        "-p",
+        "--project",
+        default=None,
         help="プロジェクト名でフィルタ（部分一致）",
     )
     parser.add_argument(
-        "-n", "--top", type=int, default=10,
+        "-n",
+        "--top",
+        type=int,
+        default=10,
         help="ランキング表示件数（デフォルト: 10）",
     )
     parser.add_argument(
-        "--no-chart", action="store_true",
+        "--no-chart",
+        action="store_true",
         help="ASCII チャートを省略",
     )
     parser.add_argument(
-        "--json", action="store_true", dest="json_output",
+        "--json",
+        action="store_true",
+        dest="json_output",
         help="JSON 形式で出力",
     )
 
@@ -946,7 +1026,11 @@ def main():
     if args.json_output:
         print(render_json_report(data, analysis, top_n=args.top))
     else:
-        print(render_text_report(data, analysis, top_n=args.top, show_chart=not args.no_chart))
+        print(
+            render_text_report(
+                data, analysis, top_n=args.top, show_chart=not args.no_chart
+            )
+        )
 
 
 if __name__ == "__main__":

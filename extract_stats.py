@@ -26,7 +26,9 @@ def load_config():
     """Load config.json, exit with helpful message if missing."""
     if not CONFIG_PATH.exists():
         print(f"ERROR: {CONFIG_PATH} not found.")
-        print(f"Copy {CONFIG_EXAMPLE.name} to {CONFIG_PATH.name} and adjust to your setup.")
+        print(
+            f"Copy {CONFIG_EXAMPLE.name} to {CONFIG_PATH.name} and adjust to your setup."
+        )
         sys.exit(1)
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -59,9 +61,13 @@ _mig = CONFIG.get("migration", {})
 MIGRATION_ENABLED = _mig.get("enabled", False)
 if MIGRATION_ENABLED and _mig.get("dir"):
     MIGRATION_DIR = Path(os.path.expanduser(_mig["dir"]))
-    MIGRATION_CLAUDE_DIR = MIGRATION_DIR / _mig.get("claude_dir_name", ".claude-windows")
+    MIGRATION_CLAUDE_DIR = MIGRATION_DIR / _mig.get(
+        "claude_dir_name", ".claude-windows"
+    )
     MIGRATION_PROJECTS_DIR = MIGRATION_CLAUDE_DIR / "projects"
-    MIGRATION_DOT_CLAUDE_JSON = MIGRATION_DIR / _mig.get("dot_claude_json_name", ".claude-windows.json")
+    MIGRATION_DOT_CLAUDE_JSON = MIGRATION_DIR / _mig.get(
+        "dot_claude_json_name", ".claude-windows.json"
+    )
     MIGRATION_STATS_CACHE = MIGRATION_CLAUDE_DIR / "stats-cache.json"
     MIGRATION_HISTORY_JSONL = MIGRATION_CLAUDE_DIR / "history.jsonl"
 else:
@@ -84,37 +90,55 @@ PLAN_HISTORY = CONFIG.get("plan_history", [])
 # ── Pricing (USD per 1M tokens) ───────────────────────────────────────────
 PRICING = {
     "claude-opus-4-6": {
-        "input": 5.00, "output": 25.00,
-        "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.00,
-        "display": "Opus 4.6"
+        "input": 5.00,
+        "output": 25.00,
+        "cache_read": 0.50,
+        "cache_write_5m": 6.25,
+        "cache_write_1h": 10.00,
+        "display": "Opus 4.6",
     },
     "claude-opus-4-5-20251101": {
-        "input": 5.00, "output": 25.00,
-        "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.00,
-        "display": "Opus 4.5"
+        "input": 5.00,
+        "output": 25.00,
+        "cache_read": 0.50,
+        "cache_write_5m": 6.25,
+        "cache_write_1h": 10.00,
+        "display": "Opus 4.5",
     },
     "claude-sonnet-4-6": {
-        "input": 3.00, "output": 15.00,
-        "cache_read": 0.30, "cache_write_5m": 3.75, "cache_write_1h": 6.00,
-        "display": "Sonnet 4.6"
+        "input": 3.00,
+        "output": 15.00,
+        "cache_read": 0.30,
+        "cache_write_5m": 3.75,
+        "cache_write_1h": 6.00,
+        "display": "Sonnet 4.6",
     },
     "claude-sonnet-4-5-20250929": {
-        "input": 3.00, "output": 15.00,
-        "cache_read": 0.30, "cache_write_5m": 3.75, "cache_write_1h": 6.00,
-        "display": "Sonnet 4.5"
+        "input": 3.00,
+        "output": 15.00,
+        "cache_read": 0.30,
+        "cache_write_5m": 3.75,
+        "cache_write_1h": 6.00,
+        "display": "Sonnet 4.5",
     },
     "claude-haiku-4-5-20251001": {
-        "input": 1.00, "output": 5.00,
-        "cache_read": 0.10, "cache_write_5m": 1.25, "cache_write_1h": 2.00,
-        "display": "Haiku 4.5"
+        "input": 1.00,
+        "output": 5.00,
+        "cache_read": 0.10,
+        "cache_write_5m": 1.25,
+        "cache_write_1h": 2.00,
+        "display": "Haiku 4.5",
     },
 }
 
 # Fallback for unknown models
 DEFAULT_PRICING = {
-    "input": 5.00, "output": 25.00,
-    "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.00,
-    "display": "Unknown"
+    "input": 5.00,
+    "output": 25.00,
+    "cache_read": 0.50,
+    "cache_write_5m": 6.25,
+    "cache_write_1h": 10.00,
+    "display": "Unknown",
 }
 
 
@@ -270,12 +294,14 @@ def load_history():
                     if dedup_key in seen_ids:
                         continue
                     seen_ids.add(dedup_key)
-                    prompts.append({
-                        "display": obj.get("display", ""),
-                        "timestamp": obj.get("timestamp", 0),
-                        "project": obj.get("project", ""),
-                        "sessionId": obj.get("sessionId", ""),
-                    })
+                    prompts.append(
+                        {
+                            "display": obj.get("display", ""),
+                            "timestamp": obj.get("timestamp", 0),
+                            "project": obj.get("project", ""),
+                            "sessionId": obj.get("sessionId", ""),
+                        }
+                    )
                 except json.JSONDecodeError:
                     continue
     prompts.sort(key=lambda p: p["timestamp"])
@@ -308,15 +334,21 @@ def load_plans():
                         break
                 # Get creation time from file
                 stat = md_file.stat()
-                plans.append({
-                    "filename": md_file.name,
-                    "slug": md_file.stem,
-                    "title": title,
-                    "created": datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).isoformat(),
-                    "modified": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                    "size_kb": round(stat.st_size / 1024, 1),
-                    "lines": len(text.splitlines()),
-                })
+                plans.append(
+                    {
+                        "filename": md_file.name,
+                        "slug": md_file.stem,
+                        "title": title,
+                        "created": datetime.fromtimestamp(
+                            stat.st_ctime, tz=timezone.utc
+                        ).isoformat(),
+                        "modified": datetime.fromtimestamp(
+                            stat.st_mtime, tz=timezone.utc
+                        ).isoformat(),
+                        "size_kb": round(stat.st_size / 1024, 1),
+                        "lines": len(text.splitlines()),
+                    }
+                )
             except Exception:
                 continue
     return plans
@@ -344,14 +376,16 @@ def load_plugins():
                         continue
                     seen_plugins.add(name)
                     v = versions[0]  # Latest version
-                    result["installed"].append({
-                        "name": name,
-                        "short_name": name.split("@")[0],
-                        "marketplace": name.split("@")[1] if "@" in name else "",
-                        "version": v.get("version", ""),
-                        "installed_at": v.get("installedAt", ""),
-                        "last_updated": v.get("lastUpdated", ""),
-                    })
+                    result["installed"].append(
+                        {
+                            "name": name,
+                            "short_name": name.split("@")[0],
+                            "marketplace": name.split("@")[1] if "@" in name else "",
+                            "version": v.get("version", ""),
+                            "installed_at": v.get("installedAt", ""),
+                            "last_updated": v.get("lastUpdated", ""),
+                        }
+                    )
             except Exception:
                 pass
 
@@ -360,7 +394,9 @@ def load_plugins():
         if counts_file.exists():
             try:
                 data = json.loads(counts_file.read_text(encoding="utf-8"))
-                counts = {c["plugin"]: c["unique_installs"] for c in data.get("counts", [])}
+                counts = {
+                    c["plugin"]: c["unique_installs"] for c in data.get("counts", [])
+                }
                 if isinstance(result["marketplace_stats"], dict):
                     result["marketplace_stats"].update(counts)
                 else:
@@ -374,7 +410,9 @@ def load_plugins():
         try:
             settings = json.loads(settings_file.read_text(encoding="utf-8"))
             result["settings"] = {
-                "permission_mode": settings.get("permissions", {}).get("defaultMode", ""),
+                "permission_mode": settings.get("permissions", {}).get(
+                    "defaultMode", ""
+                ),
                 "auto_updates": settings.get("autoUpdatesChannel", ""),
                 "enabled_plugins": settings.get("enabledPlugins", {}),
             }
@@ -499,7 +537,11 @@ def calc_storage():
     sorted_items = sorted(breakdown.items(), key=lambda x: -x[1])
     return {
         "total_mb": round(total / 1_048_576, 1),
-        "items": [{"name": k, "size_mb": round(v / 1_048_576, 2)} for k, v in sorted_items if v > 0],
+        "items": [
+            {"name": k, "size_mb": round(v / 1_048_576, 2)}
+            for k, v in sorted_items
+            if v > 0
+        ],
     }
 
 
@@ -516,7 +558,7 @@ def parse_session_transcripts():
         sources.append(("current", PROJECTS_DIR))
 
     if not sources:
-        print(f"  WARNING: No projects directories found")
+        print("  WARNING: No projects directories found")
         return sessions
 
     for source_label, projects_dir in sources:
@@ -534,7 +576,9 @@ def parse_session_transcripts():
             if not jsonl_files:
                 continue
 
-            print(f"    [{idx+1}/{total_dirs}] {project_name} ({len(jsonl_files)} files)")
+            print(
+                f"    [{idx + 1}/{total_dirs}] {project_name} ({len(jsonl_files)} files)"
+            )
 
             for jsonl_file in jsonl_files:
                 total_files += 1
@@ -568,16 +612,18 @@ def parse_session_transcripts():
                                     "project_dir": project_name,
                                     "project_path": obj.get("cwd", ""),
                                     "timestamps": [],
-                                    "models": defaultdict(lambda: {
-                                        "input_tokens": 0,
-                                        "output_tokens": 0,
-                                        "cache_read_input_tokens": 0,
-                                        "cache_creation_input_tokens": 0,
-                                        "cache_5m_tokens": 0,
-                                        "cache_1h_tokens": 0,
-                                        "cost": 0.0,
-                                        "calls": 0,
-                                    }),
+                                    "models": defaultdict(
+                                        lambda: {
+                                            "input_tokens": 0,
+                                            "output_tokens": 0,
+                                            "cache_read_input_tokens": 0,
+                                            "cache_creation_input_tokens": 0,
+                                            "cache_5m_tokens": 0,
+                                            "cache_1h_tokens": 0,
+                                            "cost": 0.0,
+                                            "calls": 0,
+                                        }
+                                    ),
                                     "tools": defaultdict(int),
                                     "message_count": 0,
                                     "user_message_count": 0,
@@ -600,7 +646,9 @@ def parse_session_transcripts():
                             if timestamp:
                                 if isinstance(timestamp, str):
                                     try:
-                                        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                                        dt = datetime.fromisoformat(
+                                            timestamp.replace("Z", "+00:00")
+                                        )
                                         ts_ms = int(dt.timestamp() * 1000)
                                         sess["timestamps"].append(ts_ms)
                                     except (ValueError, OSError):
@@ -621,17 +669,22 @@ def parse_session_transcripts():
                                     elif isinstance(content, list):
                                         text = ""
                                         for block in content:
-                                            if isinstance(block, dict) and block.get("type") == "text":
+                                            if (
+                                                isinstance(block, dict)
+                                                and block.get("type") == "text"
+                                            ):
                                                 text = block.get("text", "")
                                                 break
                                     else:
                                         text = ""
 
-                                    if (text
+                                    if (
+                                        text
                                         and not text.startswith("<command")
                                         and not text.startswith("<local-command")
                                         and not text.startswith("[Request interrupted")
-                                        and "tool_result" not in str(content)[:100]):
+                                        and "tool_result" not in str(content)[:100]
+                                    ):
                                         sess["first_prompt"] = text[:200]
 
                             # Assistant messages with token usage
@@ -640,35 +693,52 @@ def parse_session_transcripts():
                                 sess["assistant_message_count"] += 1
 
                                 message = obj.get("message", {})
-                                model = normalize_model_id(message.get("model", "unknown"))
+                                model = normalize_model_id(
+                                    message.get("model", "unknown")
+                                )
                                 usage = message.get("usage", {})
 
                                 if usage and usage.get("output_tokens", 0) > 0:
                                     m = sess["models"][model]
                                     m["input_tokens"] += usage.get("input_tokens", 0)
                                     m["output_tokens"] += usage.get("output_tokens", 0)
-                                    m["cache_read_input_tokens"] += usage.get("cache_read_input_tokens", 0)
-                                    m["cache_creation_input_tokens"] += usage.get("cache_creation_input_tokens", 0)
+                                    m["cache_read_input_tokens"] += usage.get(
+                                        "cache_read_input_tokens", 0
+                                    )
+                                    m["cache_creation_input_tokens"] += usage.get(
+                                        "cache_creation_input_tokens", 0
+                                    )
 
                                     cache_info = usage.get("cache_creation", {})
-                                    m["cache_5m_tokens"] += cache_info.get("ephemeral_5m_input_tokens", 0)
-                                    m["cache_1h_tokens"] += cache_info.get("ephemeral_1h_input_tokens", 0)
+                                    m["cache_5m_tokens"] += cache_info.get(
+                                        "ephemeral_5m_input_tokens", 0
+                                    )
+                                    m["cache_1h_tokens"] += cache_info.get(
+                                        "ephemeral_1h_input_tokens", 0
+                                    )
 
                                     m["cost"] += calc_cost(model, usage)
                                     m["calls"] += 1
 
                                 for block in message.get("content", []):
-                                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                                    if (
+                                        isinstance(block, dict)
+                                        and block.get("type") == "tool_use"
+                                    ):
                                         tool_name = block.get("name", "unknown")
                                         sess["tools"][tool_name] += 1
 
                 except Exception as e:
                     print(f"      ERROR reading {jsonl_file.name}: {e}")
 
-    migration_count = sum(1 for s in sessions.values() if s.get("source") == "migration")
+    migration_count = sum(
+        1 for s in sessions.values() if s.get("source") == "migration"
+    )
     current_count = sum(1 for s in sessions.values() if s.get("source") == "current")
-    print(f"  Parsed {total_files} files, {total_lines} lines, {len(sessions)} sessions"
-          f" (migration: {migration_count}, current: {current_count})")
+    print(
+        f"  Parsed {total_files} files, {total_lines} lines, {len(sessions)} sessions"
+        f" (migration: {migration_count}, current: {current_count})"
+    )
     return sessions
 
 
@@ -723,7 +793,9 @@ def build_plan_analysis(daily_cost_series, session_list):
         end_date = parse_date(ph["end"] or today)
         effective_billing_day = billing_day if billing_day else start_date.day
 
-        for period_start, period_end in iter_billing_periods(start_date, end_date, effective_billing_day):
+        for period_start, period_end in iter_billing_periods(
+            start_date, end_date, effective_billing_day
+        ):
             start = to_date_str(period_start)
             end = to_date_str(period_end)
 
@@ -735,10 +807,7 @@ def build_plan_analysis(daily_cost_series, session_list):
             )
 
             # Count sessions and messages
-            sess_in_period = [
-                s for s in session_list
-                if start <= s["date"] <= end
-            ]
+            sess_in_period = [s for s in session_list if start <= s["date"] <= end]
             session_count = len(sess_in_period)
             message_count = sum(s["messages"] for s in sess_in_period)
             days_active = len(set(s["date"] for s in sess_in_period))
@@ -749,21 +818,27 @@ def build_plan_analysis(daily_cost_series, session_list):
             plan_cost_usd = ph["cost_usd"]
             savings = api_cost - plan_cost_usd
 
-            periods.append({
-                "plan": ph["plan"],
-                "start": start,
-                "end": end,
-                "total_days": total_days,
-                "days_active": days_active,
-                "plan_cost_eur": ph["cost_eur"],
-                "plan_cost_usd": plan_cost_usd,
-                "api_cost": round(api_cost, 2),
-                "savings": round(savings, 2),
-                "roi_factor": round(api_cost / plan_cost_usd, 1) if plan_cost_usd > 0 else 0,
-                "sessions": session_count,
-                "messages": message_count,
-                "cost_per_day": round(api_cost / total_days, 2) if total_days > 0 else 0,
-            })
+            periods.append(
+                {
+                    "plan": ph["plan"],
+                    "start": start,
+                    "end": end,
+                    "total_days": total_days,
+                    "days_active": days_active,
+                    "plan_cost_eur": ph["cost_eur"],
+                    "plan_cost_usd": plan_cost_usd,
+                    "api_cost": round(api_cost, 2),
+                    "savings": round(savings, 2),
+                    "roi_factor": round(api_cost / plan_cost_usd, 1)
+                    if plan_cost_usd > 0
+                    else 0,
+                    "sessions": session_count,
+                    "messages": message_count,
+                    "cost_per_day": round(api_cost / total_days, 2)
+                    if total_days > 0
+                    else 0,
+                }
+            )
 
     # Current billing period (from last billing day to now)
     current_plan = PLAN_HISTORY[-1]
@@ -776,7 +851,9 @@ def build_plan_analysis(daily_cost_series, session_list):
     else:
         # Previous month
         if today_dt.month == 1:
-            billing_start = today_dt.replace(year=today_dt.year - 1, month=12, day=billing_day)
+            billing_start = today_dt.replace(
+                year=today_dt.year - 1, month=12, day=billing_day
+            )
         else:
             billing_start = today_dt.replace(month=today_dt.month - 1, day=billing_day)
 
@@ -805,7 +882,9 @@ def build_plan_analysis(daily_cost_series, session_list):
     else:
         projected_cost = 0
 
-    current_sessions = [s for s in session_list if billing_start_str <= s["date"] <= today]
+    current_sessions = [
+        s for s in session_list if billing_start_str <= s["date"] <= today
+    ]
 
     current_billing = {
         "plan": current_plan["plan"],
@@ -819,10 +898,14 @@ def build_plan_analysis(daily_cost_series, session_list):
         "api_cost": round(current_api_cost, 2),
         "projected_cost": round(projected_cost, 2),
         "savings": round(current_api_cost - current_plan["cost_usd"], 2),
-        "roi_factor": round(current_api_cost / current_plan["cost_usd"], 1) if current_plan["cost_usd"] > 0 else 0,
+        "roi_factor": round(current_api_cost / current_plan["cost_usd"], 1)
+        if current_plan["cost_usd"] > 0
+        else 0,
         "sessions": len(current_sessions),
         "messages": sum(s["messages"] for s in current_sessions),
-        "cost_per_day": round(current_api_cost / days_elapsed, 2) if days_elapsed > 0 else 0,
+        "cost_per_day": round(current_api_cost / days_elapsed, 2)
+        if days_elapsed > 0
+        else 0,
     }
 
     # Total savings across all periods
@@ -839,30 +922,53 @@ def build_plan_analysis(daily_cost_series, session_list):
     }
 
 
-def build_dashboard_data(sessions, stats_cache, dot_claude, history,
-                         plans=None, plugins=None, todos=None,
-                         file_history=None, storage=None):
+def build_dashboard_data(
+    sessions,
+    stats_cache,
+    dot_claude,
+    history,
+    plans=None,
+    plugins=None,
+    todos=None,
+    file_history=None,
+    storage=None,
+):
     """Aggregate all data into the dashboard data structure."""
 
     session_list = []
 
     daily_costs = defaultdict(lambda: defaultdict(float))
-    daily_tokens = defaultdict(lambda: defaultdict(lambda: {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}))
+    daily_tokens = defaultdict(
+        lambda: defaultdict(
+            lambda: {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
+        )
+    )
     daily_messages = defaultdict(int)
     daily_sessions = defaultdict(int)
     hourly_messages = defaultdict(int)
     weekday_messages = defaultdict(int)
-    project_stats = defaultdict(lambda: {
-        "sessions": 0, "messages": 0, "cost": 0.0,
-        "input_tokens": 0, "output_tokens": 0,
-        "cache_read_tokens": 0, "cache_write_tokens": 0,
-        "file_size": 0
-    })
-    model_totals = defaultdict(lambda: {
-        "input_tokens": 0, "output_tokens": 0,
-        "cache_read_tokens": 0, "cache_write_tokens": 0,
-        "cost": 0.0, "calls": 0
-    })
+    project_stats = defaultdict(
+        lambda: {
+            "sessions": 0,
+            "messages": 0,
+            "cost": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "file_size": 0,
+        }
+    )
+    model_totals = defaultdict(
+        lambda: {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cost": 0.0,
+            "calls": 0,
+        }
+    )
     total_cost = 0.0
     total_input = 0
     total_output = 0
@@ -905,8 +1011,12 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
 
             daily_tokens[date_str][display_model]["input"] += mdata["input_tokens"]
             daily_tokens[date_str][display_model]["output"] += mdata["output_tokens"]
-            daily_tokens[date_str][display_model]["cache_read"] += mdata["cache_read_input_tokens"]
-            daily_tokens[date_str][display_model]["cache_write"] += mdata["cache_creation_input_tokens"]
+            daily_tokens[date_str][display_model]["cache_read"] += mdata[
+                "cache_read_input_tokens"
+            ]
+            daily_tokens[date_str][display_model]["cache_write"] += mdata[
+                "cache_creation_input_tokens"
+            ]
 
             mt = model_totals[display_model]
             mt["input_tokens"] += mdata["input_tokens"]
@@ -953,36 +1063,36 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
                 max_output = mdata["output_tokens"]
                 primary_model = get_model_display(model)
 
-        session_list.append({
-            "session_id": sid,
-            "project": proj_name,
-            "project_dir": sess["project_dir"],
-            "date": date_str,
-            "start": start_dt.isoformat(),
-            "end": end_dt.isoformat(),
-            "duration_min": round(duration_s / 60, 1),
-            "cost": round(session_cost, 4),
-            "messages": sess["message_count"],
-            "user_messages": sess["user_message_count"],
-            "assistant_messages": sess["assistant_message_count"],
-            "input_tokens": session_input,
-            "output_tokens": session_output,
-            "cache_read_tokens": session_cache_read,
-            "cache_write_tokens": session_cache_write,
-            "api_calls": session_calls,
-            "primary_model": primary_model,
-            "model_breakdown": model_breakdown,
-            "tools": dict(sess["tools"]),
-            "first_prompt": sess["first_prompt"],
-            "slug": sess["slug"],
-            "file_size_mb": round(sess["file_size"] / 1_048_576, 2),
-        })
+        session_list.append(
+            {
+                "session_id": sid,
+                "project": proj_name,
+                "project_dir": sess["project_dir"],
+                "date": date_str,
+                "start": start_dt.isoformat(),
+                "end": end_dt.isoformat(),
+                "duration_min": round(duration_s / 60, 1),
+                "cost": round(session_cost, 4),
+                "messages": sess["message_count"],
+                "user_messages": sess["user_message_count"],
+                "assistant_messages": sess["assistant_message_count"],
+                "input_tokens": session_input,
+                "output_tokens": session_output,
+                "cache_read_tokens": session_cache_read,
+                "cache_write_tokens": session_cache_write,
+                "api_calls": session_calls,
+                "primary_model": primary_model,
+                "model_breakdown": model_breakdown,
+                "tools": dict(sess["tools"]),
+                "first_prompt": sess["first_prompt"],
+                "slug": sess["slug"],
+                "file_size_mb": round(sess["file_size"] / 1_048_576, 2),
+            }
+        )
 
     session_list.sort(key=lambda s: s["start"])
 
-    all_dates = sorted(set(
-        list(daily_costs.keys()) + list(daily_messages.keys())
-    ))
+    all_dates = sorted(set(list(daily_costs.keys()) + list(daily_messages.keys())))
 
     all_models = sorted(model_totals.keys())
 
@@ -1004,13 +1114,21 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
         cumulative_series.append({"date": d, "cost": round(cumulative_cost, 2)})
 
     daily_message_series = [
-        {"date": d, "messages": daily_messages.get(d, 0), "sessions": daily_sessions.get(d, 0)}
+        {
+            "date": d,
+            "messages": daily_messages.get(d, 0),
+            "sessions": daily_sessions.get(d, 0),
+        }
         for d in all_dates
     ]
 
-    hourly_dist = [{"hour": h, "messages": hourly_messages.get(h, 0)} for h in range(24)]
+    hourly_dist = [
+        {"hour": h, "messages": hourly_messages.get(h, 0)} for h in range(24)
+    ]
 
-    weekday_names = LOCALE.get("weekdays", ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"])
+    weekday_names = LOCALE.get(
+        "weekdays", ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    )
     weekday_dist = [
         {"day": weekday_names[i], "messages": weekday_messages.get(i, 0)}
         for i in range(7)
@@ -1018,29 +1136,33 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
 
     project_list = []
     for pname, pdata in sorted(project_stats.items(), key=lambda x: -x[1]["cost"]):
-        project_list.append({
-            "name": pname,
-            "sessions": pdata["sessions"],
-            "messages": pdata["messages"],
-            "cost": round(pdata["cost"], 2),
-            "input_tokens": pdata["input_tokens"],
-            "output_tokens": pdata["output_tokens"],
-            "cache_read_tokens": pdata["cache_read_tokens"],
-            "cache_write_tokens": pdata["cache_write_tokens"],
-            "file_size_mb": round(pdata["file_size"] / 1_048_576, 1),
-        })
+        project_list.append(
+            {
+                "name": pname,
+                "sessions": pdata["sessions"],
+                "messages": pdata["messages"],
+                "cost": round(pdata["cost"], 2),
+                "input_tokens": pdata["input_tokens"],
+                "output_tokens": pdata["output_tokens"],
+                "cache_read_tokens": pdata["cache_read_tokens"],
+                "cache_write_tokens": pdata["cache_write_tokens"],
+                "file_size_mb": round(pdata["file_size"] / 1_048_576, 1),
+            }
+        )
 
     model_summary = []
     for mname, mdata in sorted(model_totals.items(), key=lambda x: -x[1]["cost"]):
-        model_summary.append({
-            "model": mname,
-            "cost": round(mdata["cost"], 2),
-            "input_tokens": mdata["input_tokens"],
-            "output_tokens": mdata["output_tokens"],
-            "cache_read_tokens": mdata["cache_read_tokens"],
-            "cache_write_tokens": mdata["cache_write_tokens"],
-            "calls": mdata["calls"],
-        })
+        model_summary.append(
+            {
+                "model": mname,
+                "cost": round(mdata["cost"], 2),
+                "input_tokens": mdata["input_tokens"],
+                "output_tokens": mdata["output_tokens"],
+                "cache_read_tokens": mdata["cache_read_tokens"],
+                "cache_write_tokens": mdata["cache_write_tokens"],
+                "calls": mdata["calls"],
+            }
+        )
 
     cost_by_type = {"input": 0.0, "output": 0.0, "cache_read": 0.0, "cache_write": 0.0}
     for mname_display, mdata in model_totals.items():
@@ -1055,8 +1177,12 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
 
         cost_by_type["input"] += mdata["input_tokens"] * p["input"] / 1_000_000
         cost_by_type["output"] += mdata["output_tokens"] * p["output"] / 1_000_000
-        cost_by_type["cache_read"] += mdata["cache_read_tokens"] * p["cache_read"] / 1_000_000
-        cost_by_type["cache_write"] += mdata["cache_write_tokens"] * p["cache_write_5m"] / 1_000_000
+        cost_by_type["cache_read"] += (
+            mdata["cache_read_tokens"] * p["cache_read"] / 1_000_000
+        )
+        cost_by_type["cache_write"] += (
+            mdata["cache_write_tokens"] * p["cache_write_5m"] / 1_000_000
+        )
 
     cost_by_type = {k: round(v, 2) for k, v in cost_by_type.items()}
 
@@ -1127,7 +1253,9 @@ def generate_dashboard(data):
     if TEMPLATE_HTML.exists():
         with open(TEMPLATE_HTML, "r", encoding="utf-8") as f:
             template = f.read()
-        html = template.replace("/*__DASHBOARD_DATA__*/", f"const DASHBOARD_DATA = {data_json};")
+        html = template.replace(
+            "/*__DASHBOARD_DATA__*/", f"const DASHBOARD_DATA = {data_json};"
+        )
         html = _inject_locale(html, LOCALE)
     else:
         html = build_inline_html(data_json)
@@ -1166,7 +1294,7 @@ def build_inline_html(data_json):
 
 def _get_html_template():
     """Return the HTML template string with a placeholder for data."""
-    return '''<!DOCTYPE html>
+    return """<!DOCTYPE html>
 <html lang="__L_html_lang__">
 <head>
 <meta charset="UTF-8">
@@ -2112,7 +2240,7 @@ function renderSessionList() {
   pagDiv.textContent = '';
   if (pages > 1) {
     if (sessionPage > 0) {
-      const first = document.createElement('button'); first.textContent = '\u00AB';
+      const first = document.createElement('button'); first.textContent = '\u00ab';
       first.addEventListener('click', () => { sessionPage = 0; renderSessionList(); });
       const prev = document.createElement('button'); prev.textContent = '\u2039';
       prev.addEventListener('click', () => { sessionPage--; renderSessionList(); });
@@ -2122,9 +2250,9 @@ function renderSessionList() {
     info.textContent = D.locale.sessions_tab.page_prefix + (sessionPage + 1) + D.locale.sessions_tab.page_separator + pages;
     pagDiv.appendChild(info);
     if (sessionPage < pages - 1) {
-      const next = document.createElement('button'); next.textContent = '\u203A';
+      const next = document.createElement('button'); next.textContent = '\u203a';
       next.addEventListener('click', () => { sessionPage++; renderSessionList(); });
-      const last = document.createElement('button'); last.textContent = '\u00BB';
+      const last = document.createElement('button'); last.textContent = '\u00bb';
       last.addEventListener('click', () => { sessionPage = pages - 1; renderSessionList(); });
       pagDiv.appendChild(next); pagDiv.appendChild(last);
     }
@@ -2481,7 +2609,7 @@ renderPlan();
 renderAll();
 </script>
 </body>
-</html>'''
+</html>"""
 
 
 def main():
@@ -2489,10 +2617,12 @@ def main():
     print("=" * 50)
     print(f"  Primary:   {CLAUDE_DIR}")
     if MIGRATION_ENABLED:
-        print(f"  Migration: {MIGRATION_CLAUDE_DIR}"
-              f" ({'found' if MIGRATION_CLAUDE_DIR.exists() else 'not found'})")
+        print(
+            f"  Migration: {MIGRATION_CLAUDE_DIR}"
+            f" ({'found' if MIGRATION_CLAUDE_DIR.exists() else 'not found'})"
+        )
     else:
-        print(f"  Migration: disabled")
+        print("  Migration: disabled")
 
     t0 = time.time()
 
@@ -2525,7 +2655,9 @@ def main():
     todos = load_todos()
     file_history = load_file_history_stats()
     print(f"  Todos: {todos['total']} ({todos['completed']} completed)")
-    print(f"  File history: {file_history['total_files']} snapshots in {file_history['total_sessions']} sessions")
+    print(
+        f"  File history: {file_history['total_files']} snapshots in {file_history['total_sessions']} sessions"
+    )
 
     print("\n[8/8] Calculating storage...")
     storage = calc_storage()
@@ -2535,9 +2667,15 @@ def main():
 
     print("\nAggregating data...")
     data = build_dashboard_data(
-        sessions, stats_cache, dot_claude, history,
-        plans=plans, plugins=plugins, todos=todos,
-        file_history=file_history, storage=storage,
+        sessions,
+        stats_cache,
+        dot_claude,
+        history,
+        plans=plans,
+        plugins=plugins,
+        todos=todos,
+        file_history=file_history,
+        storage=storage,
     )
 
     print(f"\nWriting {DASHBOARD_DATA}...")

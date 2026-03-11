@@ -2,7 +2,7 @@
 
 A comprehensive analytics dashboard for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) usage data. Parses your local Claude Code session transcripts, calculates hypothetical API costs, and generates an interactive HTML dashboard.
 
-***Disclaimer:*** *This is an unofficial, community-built tool. Not affiliated with or endorsed by Anthropic.*
+***Disclaimer:*** _This is an unofficial, community-built tool. Not affiliated with or endorsed by Anthropic._
 
 ## Features
 
@@ -19,23 +19,27 @@ A comprehensive analytics dashboard for [Claude Code](https://docs.anthropic.com
 ## Quick Start
 
 1. **Clone the repository**
+
    ```bash
    git clone https://github.com/AeternaLabsHQ/claude-code-stats.git
    cd claude-code-stats
    ```
 
 2. **Create your configuration**
+
    ```bash
    cp config.example.json config.json
    ```
-   Edit `config.json` to match your subscription plan and preferences.
 
+   Edit `config.json` to match your subscription plan and preferences.
 3. **Run the extractor**
+
    ```bash
    python3 extract_stats.py
    ```
 
 4. **Open the dashboard**
+
    ```bash
    open public/dashboard.html      # macOS
    xdg-open public/dashboard.html  # Linux
@@ -97,7 +101,8 @@ The script generates files in the `public/` directory:
 
 ## Context Consumption Analyzer
 
-`analyze_context.py` is a standalone CLI tool that analyzes context consumption patterns of a specific Claude Code session. It helps identify what causes context growth and compaction (context compression) events.
+`analyze_context.py` is a standalone CLI tool that analyzes context consumption patterns of a specific Claude Code session.
+It helps identify what causes context growth and compaction (context compression) events.
 
 ### Usage
 

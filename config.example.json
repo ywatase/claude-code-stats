@@ -5,8 +5,8 @@
       "plan": "Pro",
       "start": "2025-01-01",
       "end": "2025-01-31",
-      "cost_eur": 18.00,
-      "cost_usd": 20.00,
+      "cost_eur": 18.0,
+      "cost_usd": 20.0,
       "billing_day": null
     },
     {
@@ -14,7 +14,7 @@
       "start": "2025-02-01",
       "end": null,
       "cost_eur": 87.61,
-      "cost_usd": 93.00,
+      "cost_usd": 93.0,
       "billing_day": 1
     }
   ],

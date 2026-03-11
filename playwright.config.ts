@@ -1,21 +1,21 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
-  testDir: './e2e',
+  testDir: "./e2e",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  reporter: "html",
   use: {
     baseURL: `file://${__dirname}/public`,
-    screenshot: 'only-on-failure',
-    trace: 'on-first-retry',
+    screenshot: "only-on-failure",
+    trace: "on-first-retry",
   },
   projects: [
     {
-      name: 'chromium',
-      use: { browserName: 'chromium' },
+      name: "chromium",
+      use: { browserName: "chromium" },
     },
   ],
 });
