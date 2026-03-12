@@ -56,6 +56,11 @@ DOT_CLAUDE_JSON = Path(os.path.expanduser("~/.claude.json"))
 STATS_CACHE = CLAUDE_DIR / "stats-cache.json"
 HISTORY_JSONL = CLAUDE_DIR / "history.jsonl"
 
+# ── Extra Session Directories (optional, configured in config.json) ───────
+EXTRA_SESSION_DIRS = [
+    Path(os.path.expanduser(d)) for d in CONFIG.get("extra_session_dirs", []) if d
+]
+
 # ── Migration Backup (optional, configured in config.json) ───────────────
 _mig = CONFIG.get("migration", {})
 MIGRATION_ENABLED = _mig.get("enabled", False)
@@ -556,6 +561,12 @@ def parse_session_transcripts():
         sources.append(("migration", MIGRATION_PROJECTS_DIR))
     if PROJECTS_DIR.exists():
         sources.append(("current", PROJECTS_DIR))
+    for i, extra_dir in enumerate(EXTRA_SESSION_DIRS):
+        projects_subdir = extra_dir / "projects"
+        if projects_subdir.exists():
+            sources.append((f"extra-{i}:{extra_dir.name}", projects_subdir))
+        elif extra_dir.exists():
+            print(f"  WARNING: {extra_dir} exists but has no 'projects' subdirectory")
 
     if not sources:
         print("  WARNING: No projects directories found")
@@ -1895,6 +1906,7 @@ function renderAll() {
   renderActivity();
   renderProjects();
   renderSessions();
+  renderPlan();
   renderInsights();
 }
 
@@ -1950,6 +1962,32 @@ function switchTab(name, btn) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('tab-' + name).classList.add('active');
+}
+
+function drillDownToDate(date) {
+  document.getElementById('periodFrom').value = date;
+  document.getElementById('periodTo').value = date;
+  document.getElementById('periodPreset').value = 'custom';
+  sessionPage = 0;
+  renderAll();
+  // Switch to Sessions tab
+  const btns = document.querySelectorAll('.tab-btn');
+  const sessIdx = TAB_NAMES.findIndex(t => t.id === 'sessions');
+  if (sessIdx >= 0 && btns[sessIdx]) switchTab('sessions', btns[sessIdx]);
+}
+
+function addDrillDownHandler(chartId) {
+  const canvas = document.getElementById(chartId);
+  canvas.addEventListener('dblclick', (evt) => {
+    const chart = chartRefs[chartId];
+    if (!chart) return;
+    const points = chart.getElementsAtEventForMode(evt, 'nearest', {intersect: true}, false);
+    if (points.length > 0) {
+      const idx = points[0].index;
+      const date = chart.data.labels[idx];
+      if (date && /^\\d{4}-\\d{2}-\\d{2}$/.test(date)) drillDownToDate(date);
+    }
+  });
 }
 
 // ── Tab 1: Costs ───────────────────────────────────────────────────────
@@ -2067,6 +2105,9 @@ function renderActivity() {
     options: { responsive: true, maintainAspectRatio: false,
       plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: scaleDefaults }
   });
+
+  addDrillDownHandler('chartDailyMsgs');
+  addDrillDownHandler('chartDailySessions');
 }
 
 // ── Tab 3: Projects ────────────────────────────────────────────────────
@@ -2260,19 +2301,64 @@ function renderSessionList() {
 }
 
 // ── Tab 5: Plan & Billing ──────────────────────────────────────────────
-function renderPlan() {
+function filterPlanData() {
   const plan = D.plan;
+  if (!plan) return null;
+  const { from, to } = getSelectedRange();
+  const filtered = plan.periods.filter(p => p.start <= to && p.end >= from);
+  const totalApi = filtered.reduce((s, p) => s + p.api_cost, 0);
+  const totalPlan = filtered.reduce((s, p) => s + p.plan_cost_usd, 0);
+  const cb = plan.current_billing;
+  const cbVisible = cb && cb.period_start <= to && cb.period_end >= from;
+  return {
+    periods: filtered,
+    current_billing: cbVisible ? cb : null,
+    total_api_cost: Math.round(totalApi * 100) / 100,
+    total_plan_cost: Math.round(totalPlan * 100) / 100,
+    total_savings: Math.round((totalApi - totalPlan) * 100) / 100,
+    overall_roi: totalPlan > 0 ? Math.round(totalApi / totalPlan * 10) / 10 : 0,
+  };
+}
+
+function renderPlan() {
+  const plan = filterPlanData();
   if (!plan) return;
+
+  // Clear all DOM elements
+  const grid = document.getElementById('planKpi');
+  grid.textContent = '';
+  const bp = document.getElementById('billingProgress');
+  bp.textContent = '';
+  const comp = document.getElementById('planComparison');
+  while (comp.childNodes.length > 0) comp.removeChild(comp.lastChild);
+  const compH3 = document.createElement('h3');
+  compH3.textContent = 'API Cost vs. Plan Cost per Billing Period';
+  comp.appendChild(compH3);
+  const tbody = document.getElementById('planTableBody');
+  tbody.textContent = '';
+  destroyChart('chartPlanSavings');
+  destroyChart('chartCostPerDay');
+
+  if (plan.periods.length === 0) {
+    const msg = document.createElement('div');
+    msg.style.cssText = 'color:var(--text2);padding:20px;';
+    msg.textContent = 'No plan periods in selected range.';
+    grid.appendChild(msg);
+    return;
+  }
+
   const cb = plan.current_billing;
 
   // KPI cards
-  const grid = document.getElementById('planKpi');
-  const kpis = [
-    {cls:'plan-type', label:D.locale.plan.current_plan, value:cb.plan, sub:fmtUSD(cb.plan_cost_usd) + D.locale.plan.monthly_suffix + (cb.plan_cost_eur != null ? ' (' + cb.plan_cost_eur.toFixed(2) + ' \\u20ac)' : '')},
+  const kpis = [];
+  if (cb) {
+    kpis.push({cls:'plan-type', label:D.locale.plan.current_plan, value:cb.plan, sub:fmtUSD(cb.plan_cost_usd) + D.locale.plan.monthly_suffix + (cb.plan_cost_eur != null ? ' (' + cb.plan_cost_eur.toFixed(2) + ' \\u20ac)' : '')});
+  }
+  kpis.push(
     {cls:'api-cost', label:D.locale.plan.total_api_cost, value:fmtUSD(plan.total_api_cost), sub:D.locale.plan.total_api_sub},
     {cls:'savings', label:D.locale.plan.total_savings, value:fmtUSD(plan.total_savings), sub:D.locale.plan.total_savings_sub},
     {cls:'roi', label:D.locale.plan.roi_factor, value:plan.overall_roi + 'x', sub:D.locale.plan.roi_sub},
-  ];
+  );
   kpis.forEach(c => {
     const div = document.createElement('div');
     div.className = 'plan-card ' + c.cls;
@@ -2283,45 +2369,45 @@ function renderPlan() {
     grid.appendChild(div);
   });
 
-  // Billing progress
-  const bp = document.getElementById('billingProgress');
-  const pct = Math.min(100, Math.round(cb.days_elapsed / cb.days_total * 100));
-  const barColor = cb.api_cost > cb.plan_cost_usd * 0.8 ? 'var(--green)' : 'var(--accent)';
+  // Billing progress (only if current billing is in range)
+  if (cb) {
+    const pct = Math.min(100, Math.round(cb.days_elapsed / cb.days_total * 100));
+    const barColor = cb.api_cost > cb.plan_cost_usd * 0.8 ? 'var(--green)' : 'var(--accent)';
 
-  const h3 = document.createElement('h3');
-  h3.textContent = D.locale.plan.billing_period + ' (' + cb.period_start + ' \u2013 ' + cb.period_end + ')';
-  bp.appendChild(h3);
+    const h3 = document.createElement('h3');
+    h3.textContent = D.locale.plan.billing_period + ' (' + cb.period_start + ' \u2013 ' + cb.period_end + ')';
+    bp.appendChild(h3);
 
-  const outer = document.createElement('div'); outer.className = 'progress-bar-outer';
-  const inner = document.createElement('div'); inner.className = 'progress-bar-inner';
-  inner.style.width = pct + '%';
-  inner.style.background = 'linear-gradient(90deg, var(--accent), ' + barColor + ')';
-  inner.textContent = pct + '%';
-  outer.appendChild(inner);
-  bp.appendChild(outer);
+    const outer = document.createElement('div'); outer.className = 'progress-bar-outer';
+    const inner = document.createElement('div'); inner.className = 'progress-bar-inner';
+    inner.style.width = pct + '%';
+    inner.style.background = 'linear-gradient(90deg, var(--accent), ' + barColor + ')';
+    inner.textContent = pct + '%';
+    outer.appendChild(inner);
+    bp.appendChild(outer);
 
-  const stats = document.createElement('div'); stats.className = 'progress-stats';
-  const statItems = [
-    {label:D.locale.plan.day, val:cb.days_elapsed + ' / ' + cb.days_total},
-    {label:D.locale.plan.api_cost_so_far, val:fmtUSD(cb.api_cost)},
-    {label:D.locale.plan.projected, val:fmtUSD(cb.projected_cost)},
-    {label:D.locale.plan.savings_so_far, val:fmtUSD(cb.savings)},
-    {label:D.locale.plan.roi, val:cb.roi_factor + 'x'},
-    {label:D.locale.plan.sessions, val:String(cb.sessions)},
-    {label:D.locale.plan.messages, val:fmt(cb.messages)},
-    {label:D.locale.plan.avg_per_day, val:fmtUSD(cb.cost_per_day)},
-  ];
-  statItems.forEach(s => {
-    const item = document.createElement('div'); item.className = 'stat-item';
-    const lbl = document.createElement('span'); lbl.textContent = s.label;
-    const val = document.createElement('span'); val.className = 'stat-val'; val.textContent = s.val;
-    item.appendChild(lbl); item.appendChild(val);
-    stats.appendChild(item);
-  });
-  bp.appendChild(stats);
+    const stats = document.createElement('div'); stats.className = 'progress-stats';
+    const statItems = [
+      {label:D.locale.plan.day, val:cb.days_elapsed + ' / ' + cb.days_total},
+      {label:D.locale.plan.api_cost_so_far, val:fmtUSD(cb.api_cost)},
+      {label:D.locale.plan.projected, val:fmtUSD(cb.projected_cost)},
+      {label:D.locale.plan.savings_so_far, val:fmtUSD(cb.savings)},
+      {label:D.locale.plan.roi, val:cb.roi_factor + 'x'},
+      {label:D.locale.plan.sessions, val:String(cb.sessions)},
+      {label:D.locale.plan.messages, val:fmt(cb.messages)},
+      {label:D.locale.plan.avg_per_day, val:fmtUSD(cb.cost_per_day)},
+    ];
+    statItems.forEach(s => {
+      const item = document.createElement('div'); item.className = 'stat-item';
+      const lbl = document.createElement('span'); lbl.textContent = s.label;
+      const val = document.createElement('span'); val.className = 'stat-val'; val.textContent = s.val;
+      item.appendChild(lbl); item.appendChild(val);
+      stats.appendChild(item);
+    });
+    bp.appendChild(stats);
+  }
 
   // Comparison bars
-  const comp = document.getElementById('planComparison');
   const maxApi = Math.max(...plan.periods.map(p => p.api_cost), 1);
 
   plan.periods.forEach(p => {
@@ -2366,7 +2452,7 @@ function renderPlan() {
   // Charts
   const periodLabels = plan.periods.map(p => p.plan + ' (' + p.start.slice(5) + ')');
 
-  new Chart(document.getElementById('chartPlanSavings'), {
+  newChart('chartPlanSavings', {
     type: 'bar',
     data: {
       labels: periodLabels,
@@ -2380,7 +2466,7 @@ function renderPlan() {
       scales: { x: scaleDefaults.x, y: { ...scaleDefaults.y, title: { display: true, text: 'USD', color: '#64748b' } } } }
   });
 
-  new Chart(document.getElementById('chartCostPerDay'), {
+  newChart('chartCostPerDay', {
     type: 'bar',
     data: {
       labels: periodLabels,
@@ -2394,7 +2480,6 @@ function renderPlan() {
   });
 
   // Period table
-  const tbody = document.getElementById('planTableBody');
   plan.periods.forEach(p => {
     const tr = document.createElement('tr');
     const cells = [
@@ -2605,7 +2690,6 @@ document.getElementById('filterSearch').addEventListener('input', () => { sessio
 // ── Init ───────────────────────────────────────────────────────────────
 initTabs();
 initPeriodFilter();
-renderPlan();
 renderAll();
 </script>
 </body>

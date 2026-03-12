@@ -18,6 +18,10 @@
       "billing_day": 1
     }
   ],
+  "extra_session_dirs": [
+    "/path/to/docker/container/.claude",
+    "/path/to/another/.claude"
+  ],
   "migration": {
     "enabled": false,
     "dir": null,
