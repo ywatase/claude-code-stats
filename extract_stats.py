@@ -1533,7 +1533,7 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 
   <div class="tabs" id="tabBar"></div>
 
-  <div class="tab-content active" id="tab-costs">
+  <div class="tab-content" id="tab-costs">
     <div class="chart-grid full">
       <div class="chart-box"><h3>__L_costs_daily_cost__</h3><canvas id="chartDailyCost"></canvas></div>
     </div>
@@ -1606,7 +1606,7 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
     <div class="pagination" id="sessionPagination"></div>
   </div>
 
-  <div class="tab-content" id="tab-kpi_dashboard">
+  <div class="tab-content active" id="tab-kpi_dashboard">
     <div id="kpiProgressGrid" class="plan-highlight" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:24px"></div>
     <div class="chart-grid">
       <div class="chart-box"><h3>__L_kpi_dashboard_daily_duration__</h3><canvas id="chartKpiDailyDuration"></canvas></div>
@@ -2020,8 +2020,8 @@ function renderKPI() {
 
 // ── Tabs ───────────────────────────────────────────────────────────────
 const TAB_NAMES = [
-  {id:'costs', label:D.locale.tabs.costs},
   {id:'kpi_dashboard', label:D.locale.tabs.kpi_dashboard},
+  {id:'costs', label:D.locale.tabs.costs},
   {id:'activity', label:D.locale.tabs.activity},
   {id:'projects', label:D.locale.tabs.projects},
   {id:'sessions', label:D.locale.tabs.sessions},
