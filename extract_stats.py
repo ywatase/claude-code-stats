@@ -56,6 +56,11 @@ DOT_CLAUDE_JSON = Path(os.path.expanduser("~/.claude.json"))
 STATS_CACHE = CLAUDE_DIR / "stats-cache.json"
 HISTORY_JSONL = CLAUDE_DIR / "history.jsonl"
 
+# ── Extra Session Directories (optional, configured in config.json) ───────
+EXTRA_SESSION_DIRS = [
+    Path(os.path.expanduser(d)) for d in CONFIG.get("extra_session_dirs", []) if d
+]
+
 # ── Migration Backup (optional, configured in config.json) ───────────────
 _mig = CONFIG.get("migration", {})
 MIGRATION_ENABLED = _mig.get("enabled", False)
@@ -86,6 +91,14 @@ TEMPLATE_HTML = Path(__file__).parent / "dashboard_template.html"
 
 # ── Plan Configuration (from config.json) ────────────────────────────────
 PLAN_HISTORY = CONFIG.get("plan_history", [])
+
+# ── KPI Targets (from config.json) ───────────────────────────────────────
+_kpi = CONFIG.get("kpi_targets", {})
+KPI_TARGETS = {
+    "monthly_ai_duration_hours": _kpi.get("monthly_ai_duration_hours", 160),
+    "monthly_cost_jpy": _kpi.get("monthly_cost_jpy", 100000),
+    "usd_to_jpy": _kpi.get("usd_to_jpy", 150),
+}
 
 # ── Pricing (USD per 1M tokens) ───────────────────────────────────────────
 PRICING = {
@@ -556,6 +569,12 @@ def parse_session_transcripts():
         sources.append(("migration", MIGRATION_PROJECTS_DIR))
     if PROJECTS_DIR.exists():
         sources.append(("current", PROJECTS_DIR))
+    for i, extra_dir in enumerate(EXTRA_SESSION_DIRS):
+        projects_subdir = extra_dir / "projects"
+        if projects_subdir.exists():
+            sources.append((f"extra-{i}:{extra_dir.name}", projects_subdir))
+        elif extra_dir.exists():
+            print(f"  WARNING: {extra_dir} exists but has no 'projects' subdirectory")
 
     if not sources:
         print("  WARNING: No projects directories found")
@@ -612,6 +631,7 @@ def parse_session_transcripts():
                                     "project_dir": project_name,
                                     "project_path": obj.get("cwd", ""),
                                     "timestamps": [],
+                                    "typed_timestamps": [],
                                     "models": defaultdict(
                                         lambda: {
                                             "input_tokens": 0,
@@ -643,6 +663,7 @@ def parse_session_transcripts():
                                 sess["slug"] = obj["slug"]
 
                             # Collect timestamps
+                            ts_ms = None
                             if timestamp:
                                 if isinstance(timestamp, str):
                                     try:
@@ -654,7 +675,12 @@ def parse_session_transcripts():
                                     except (ValueError, OSError):
                                         pass
                                 elif isinstance(timestamp, (int, float)):
-                                    sess["timestamps"].append(int(timestamp))
+                                    ts_ms = int(timestamp)
+                                    sess["timestamps"].append(ts_ms)
+
+                            # Track typed timestamps for AI turn duration
+                            if ts_ms and msg_type in ("user", "assistant"):
+                                sess["typed_timestamps"].append((msg_type, ts_ms))
 
                             # User messages
                             if msg_type == "user":
@@ -739,7 +765,36 @@ def parse_session_transcripts():
         f"  Parsed {total_files} files, {total_lines} lines, {len(sessions)} sessions"
         f" (migration: {migration_count}, current: {current_count})"
     )
+    # Calculate AI turn duration for each session
+    for sess in sessions.values():
+        sess["ai_turn_duration_ms"] = _calc_ai_turn_duration(sess["typed_timestamps"])
+
     return sessions
+
+
+def _calc_ai_turn_duration(typed_timestamps):
+    """Calculate total AI turn time from typed timestamp pairs.
+
+    AI turn = interval from last user message to last assistant message
+    in each user→assistant sequence.
+    """
+    if not typed_timestamps:
+        return 0
+
+    total_ms = 0
+    last_user_ts = None
+
+    for msg_type, ts in typed_timestamps:
+        if msg_type == "user":
+            last_user_ts = ts
+        elif msg_type == "assistant" and last_user_ts is not None:
+            turn_ms = ts - last_user_ts
+            # Ignore unreasonable turns (> 30 min or negative)
+            if 0 < turn_ms < 30 * 60 * 1000:
+                total_ms += turn_ms
+            last_user_ts = None
+
+    return total_ms
 
 
 def build_plan_analysis(daily_cost_series, session_list):
@@ -1087,6 +1142,7 @@ def build_dashboard_data(
                 "first_prompt": sess["first_prompt"],
                 "slug": sess["slug"],
                 "file_size_mb": round(sess["file_size"] / 1_048_576, 2),
+                "ai_duration_min": round(sess.get("ai_turn_duration_ms", 0) / 60000, 1),
             }
         )
 
@@ -1203,6 +1259,12 @@ def build_dashboard_data(
     # ── Actual plan cost for KPI ─────────────────────────────────────────
     actual_plan_cost = plan_analysis.get("total_plan_cost", 0)
 
+    # ── Total AI duration ─────────────────────────────────────────────────
+    total_ai_duration_ms = sum(
+        s.get("ai_duration_min", 0) * 60000 for s in session_list
+    )
+    total_ai_duration_hours = round(total_ai_duration_ms / 3_600_000, 2)
+
     data = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "locale": LOCALE,
@@ -1220,7 +1282,9 @@ def build_dashboard_data(
             "first_session": all_dates[0] if all_dates else "",
             "last_session": all_dates[-1] if all_dates else "",
             "total_projects": len(project_list),
+            "total_ai_duration_hours": total_ai_duration_hours,
         },
+        "kpi_targets": KPI_TARGETS,
         "plan": plan_analysis,
         "daily_costs": daily_cost_series,
         "cumulative_costs": cumulative_series,
@@ -1469,7 +1533,7 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 
   <div class="tabs" id="tabBar"></div>
 
-  <div class="tab-content active" id="tab-costs">
+  <div class="tab-content" id="tab-costs">
     <div class="chart-grid full">
       <div class="chart-box"><h3>__L_costs_daily_cost__</h3><canvas id="chartDailyCost"></canvas></div>
     </div>
@@ -1540,6 +1604,21 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
     </div>
     <div id="sessionList"></div>
     <div class="pagination" id="sessionPagination"></div>
+  </div>
+
+  <div class="tab-content active" id="tab-kpi_dashboard">
+    <div id="kpiProgressGrid" class="plan-highlight" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:24px"></div>
+    <div class="chart-grid">
+      <div class="chart-box"><h3>__L_kpi_dashboard_daily_duration__</h3><canvas id="chartKpiDailyDuration"></canvas></div>
+      <div class="chart-box"><h3>__L_kpi_dashboard_daily_cost__</h3><canvas id="chartKpiDailyCost"></canvas></div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-box"><h3>__L_kpi_dashboard_weekly_duration__</h3><canvas id="chartKpiWeeklyDuration"></canvas></div>
+      <div class="chart-box"><h3>__L_kpi_dashboard_weekly_cost__</h3><canvas id="chartKpiWeeklyCost"></canvas></div>
+    </div>
+    <div class="chart-grid full">
+      <div class="chart-box tall"><h3>__L_kpi_dashboard_monthly_trend__</h3><canvas id="chartKpiMonthlyTrend"></canvas></div>
+    </div>
   </div>
 
   <div class="tab-content" id="tab-plan">
@@ -1756,6 +1835,8 @@ function buildViewData() {
   let totalInput = 0;
   let totalOutput = 0;
   let totalMessages = 0;
+  let totalAiDurationMin = 0;
+  const dailyAiDuration = {};
 
   sessions.forEach(s => {
     const day = dateOnly(s.start);
@@ -1767,6 +1848,10 @@ function buildViewData() {
     totalInput += s.input_tokens || 0;
     totalOutput += s.output_tokens || 0;
     totalMessages += s.messages || 0;
+
+    const aiMin = s.ai_duration_min || 0;
+    totalAiDurationMin += aiMin;
+    dailyAiDuration[day] = (dailyAiDuration[day] || 0) + aiMin;
 
     dailyMessages[day] = (dailyMessages[day] || 0) + (s.messages || 0);
     dailySessions[day] = (dailySessions[day] || 0) + 1;
@@ -1861,6 +1946,11 @@ function buildViewData() {
   });
   Object.keys(costByType).forEach(k => { costByType[k] = Math.round(costByType[k] * 100) / 100; });
 
+  const dailyAiDurationSeries = allDates.map(day => ({
+    date: day,
+    ai_duration_hours: Math.round((dailyAiDuration[day] || 0) / 60 * 100) / 100,
+  }));
+
   return {
     range: { from, to },
     kpi: {
@@ -1873,7 +1963,9 @@ function buildViewData() {
       first_session: allDates[0] || '',
       last_session: allDates[allDates.length - 1] || '',
       total_projects: projectList.length,
+      total_ai_duration_hours: Math.round(totalAiDurationMin / 60 * 100) / 100,
     },
+    daily_ai_duration: dailyAiDurationSeries,
     daily_costs: dailyCostSeries,
     cumulative_costs: cumulativeSeries,
     daily_messages: dailyMessageSeries,
@@ -1892,9 +1984,11 @@ function renderAll() {
   VIEW = buildViewData();
   renderKPI();
   renderCosts();
+  renderKpiDashboard();
   renderActivity();
   renderProjects();
   renderSessions();
+  renderPlan();
   renderInsights();
 }
 
@@ -1926,6 +2020,7 @@ function renderKPI() {
 
 // ── Tabs ───────────────────────────────────────────────────────────────
 const TAB_NAMES = [
+  {id:'kpi_dashboard', label:D.locale.tabs.kpi_dashboard},
   {id:'costs', label:D.locale.tabs.costs},
   {id:'activity', label:D.locale.tabs.activity},
   {id:'projects', label:D.locale.tabs.projects},
@@ -1950,6 +2045,32 @@ function switchTab(name, btn) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('tab-' + name).classList.add('active');
+}
+
+function drillDownToDate(date) {
+  document.getElementById('periodFrom').value = date;
+  document.getElementById('periodTo').value = date;
+  document.getElementById('periodPreset').value = 'custom';
+  sessionPage = 0;
+  renderAll();
+  // Switch to Sessions tab
+  const btns = document.querySelectorAll('.tab-btn');
+  const sessIdx = TAB_NAMES.findIndex(t => t.id === 'sessions');
+  if (sessIdx >= 0 && btns[sessIdx]) switchTab('sessions', btns[sessIdx]);
+}
+
+function addDrillDownHandler(chartId) {
+  const canvas = document.getElementById(chartId);
+  canvas.addEventListener('dblclick', (evt) => {
+    const chart = chartRefs[chartId];
+    if (!chart) return;
+    const points = chart.getElementsAtEventForMode(evt, 'nearest', {intersect: true}, false);
+    if (points.length > 0) {
+      const idx = points[0].index;
+      const date = chart.data.labels[idx];
+      if (date && /^\\d{4}-\\d{2}-\\d{2}$/.test(date)) drillDownToDate(date);
+    }
+  });
 }
 
 // ── Tab 1: Costs ───────────────────────────────────────────────────────
@@ -2029,6 +2150,245 @@ function renderCosts() {
   });
 }
 
+// ── KPI Dashboard ──────────────────────────────────────────────────────
+function fmtJPY(n) {
+  return '\u00a5' + Math.round(n).toLocaleString(D.locale.locale_code);
+}
+
+function renderKpiDashboard() {
+  const L = D.locale.kpi_dashboard || {};
+  const targets = D.kpi_targets || { monthly_ai_duration_hours: 160, monthly_cost_jpy: 100000, usd_to_jpy: 150 };
+  const { from, to } = VIEW.range;
+
+  // Calculate period days and month context
+  const fromDt = new Date(from + 'T00:00:00Z');
+  const toDt = new Date(to + 'T00:00:00Z');
+  const periodDays = Math.max(1, Math.floor((toDt - fromDt) / 86400000) + 1);
+
+  // Detect if "this month" — check if from is 1st of month and to is within same month
+  const isThisMonth = fromDt.getUTCDate() === 1 && fromDt.getUTCMonth() === toDt.getUTCMonth() && fromDt.getUTCFullYear() === toDt.getUTCFullYear();
+  const daysInMonth = isThisMonth ? new Date(Date.UTC(fromDt.getUTCFullYear(), fromDt.getUTCMonth() + 1, 0)).getUTCDate() : 30;
+
+  // Pro-rate targets to the selected period
+  const targetDurationH = targets.monthly_ai_duration_hours * periodDays / daysInMonth;
+  const targetCostJPY = targets.monthly_cost_jpy * periodDays / daysInMonth;
+  const usdToJpy = targets.usd_to_jpy || 150;
+
+  const actualDurationH = VIEW.kpi.total_ai_duration_hours || 0;
+  const actualCostUSD = VIEW.kpi.total_cost || 0;
+  const actualCostJPY = actualCostUSD * usdToJpy;
+
+  // Period progress ratio (how far into the period we are)
+  const today = new Date();
+  const todayStr = utcDateString(today);
+  const effectiveTo = todayStr < to ? todayStr : to;
+  const elapsedDays = Math.max(1, Math.floor((new Date(effectiveTo + 'T00:00:00Z') - fromDt) / 86400000) + 1);
+  const periodProgressRatio = elapsedDays / periodDays;
+
+  // Daily averages
+  const dailyAvgDuration = actualDurationH / elapsedDays;
+  const dailyAvgCostJPY = actualCostJPY / elapsedDays;
+
+  // Projected
+  const projectedDuration = dailyAvgDuration * periodDays;
+  const projectedCostJPY = dailyAvgCostJPY * periodDays;
+
+  // Remaining
+  const remainDuration = Math.max(0, targetDurationH - actualDurationH);
+  const remainCostJPY = Math.max(0, targetCostJPY - actualCostJPY);
+
+  // Progress ratios
+  const durationRatio = targetDurationH > 0 ? actualDurationH / targetDurationH : 0;
+  const costRatio = targetCostJPY > 0 ? actualCostJPY / targetCostJPY : 0;
+
+  function progressColor(ratio) {
+    if (ratio < periodProgressRatio * 0.8) return '#ef4444';
+    if (ratio < periodProgressRatio * 1.2) return '#eab308';
+    return '#22c55e';
+  }
+
+  function statusLabel(ratio) {
+    if (ratio < periodProgressRatio * 0.8) return L.behind || 'Behind';
+    if (ratio < periodProgressRatio * 1.2) return L.on_track || 'On Track';
+    return L.ahead || 'Ahead';
+  }
+
+  function buildCard(title, actual, target, unit, ratio, dailyAvg, remaining, projected) {
+    const color = progressColor(ratio);
+    const status = statusLabel(ratio);
+    const pct = Math.round(ratio * 100);
+    return '<div class="plan-card" style="background:var(--bg2);border-radius:12px;padding:20px">' +
+      '<div style="font-size:0.85rem;color:#94a3b8;margin-bottom:4px">' + escHtml(title) + '</div>' +
+      '<div class="value" style="font-size:1.8rem;font-weight:700;color:#f1f5f9">' + actual + '</div>' +
+      '<div style="margin:8px 0;font-size:0.8rem;color:#64748b">' + (L.target || 'Target') + ': ' + target + '</div>' +
+      '<div style="background:#1e293b;border-radius:6px;height:10px;overflow:hidden;margin-bottom:8px">' +
+        '<div style="width:' + Math.min(pct, 100) + '%;height:100%;background:' + color + ';border-radius:6px;transition:width 0.3s"></div>' +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:0.75rem;color:#94a3b8">' +
+        '<span>' + pct + '% - ' + escHtml(status) + '</span>' +
+      '</div>' +
+      '<div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:0.75rem">' +
+        '<div><span style="color:#64748b">' + (L.daily_avg || 'Daily Avg') + '</span><br><span style="color:#f1f5f9">' + dailyAvg + '</span></div>' +
+        '<div><span style="color:#64748b">' + (L.remaining || 'Remaining') + '</span><br><span style="color:#f1f5f9">' + remaining + '</span></div>' +
+        '<div><span style="color:#64748b">' + (L.projected || 'Projected') + '</span><br><span style="color:#f1f5f9">' + projected + '</span></div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  const grid = document.getElementById('kpiProgressGrid');
+  grid.innerHTML =
+    buildCard(
+      L.ai_duration || 'AI Working Time',
+      actualDurationH.toFixed(1) + 'h',
+      targetDurationH.toFixed(0) + 'h',
+      'h',
+      durationRatio,
+      dailyAvgDuration.toFixed(1) + 'h',
+      remainDuration.toFixed(1) + 'h',
+      projectedDuration.toFixed(1) + 'h'
+    ) +
+    buildCard(
+      L.token_cost || 'Token Cost',
+      fmtJPY(actualCostJPY),
+      fmtJPY(targetCostJPY),
+      '\u00a5',
+      costRatio,
+      fmtJPY(dailyAvgCostJPY),
+      fmtJPY(remainCostJPY),
+      fmtJPY(projectedCostJPY) + ' (' + fmtUSD(actualCostUSD) + ')'
+    );
+
+  // ── Daily charts ───────────────────────────────────────────────────
+  const dailyDuration = VIEW.daily_ai_duration || [];
+  const dailyCosts = VIEW.daily_costs || [];
+  const dailyTargetH = targetDurationH / periodDays;
+  const dailyTargetJPY = targetCostJPY / periodDays;
+
+  newChart('chartKpiDailyDuration', {
+    type: 'bar',
+    data: {
+      labels: dailyDuration.map(d => d.date),
+      datasets: [
+        { label: L.ai_duration || 'AI Duration', data: dailyDuration.map(d => d.ai_duration_hours), backgroundColor: '#60a5fa', borderRadius: 2 },
+        { label: L.target_line || 'Target', data: dailyDuration.map(() => dailyTargetH), type: 'line', borderColor: '#ef4444', borderDash: [5,5], pointRadius: 0, borderWidth: 2, fill: false }
+      ]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#94a3b8' } } },
+      scales: { x: scaleDefaults.x, y: { ...scaleDefaults.y, title: { display: true, text: 'hours', color: '#64748b' } } } }
+  });
+
+  newChart('chartKpiDailyCost', {
+    type: 'bar',
+    data: {
+      labels: dailyCosts.map(d => d.date),
+      datasets: [
+        { label: L.token_cost || 'Token Cost', data: dailyCosts.map(d => (d.total || 0) * usdToJpy), backgroundColor: '#f59e0b', borderRadius: 2 },
+        { label: L.target_line || 'Target', data: dailyCosts.map(() => dailyTargetJPY), type: 'line', borderColor: '#ef4444', borderDash: [5,5], pointRadius: 0, borderWidth: 2, fill: false }
+      ]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#94a3b8' } } },
+      scales: { x: scaleDefaults.x, y: { ...scaleDefaults.y, title: { display: true, text: '\u00a5', color: '#64748b' } } } }
+  });
+
+  // ── Weekly aggregation (ISO week) ──────────────────────────────────
+  function isoWeekLabel(dateStr) {
+    const dt = new Date(dateStr + 'T00:00:00Z');
+    const thu = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+    thu.setUTCDate(thu.getUTCDate() + 3 - (thu.getUTCDay() + 6) % 7);
+    const yearStart = new Date(Date.UTC(thu.getUTCFullYear(), 0, 4));
+    const weekNum = Math.ceil(((thu - yearStart) / 86400000 + 1) / 7);
+    return thu.getUTCFullYear() + '-W' + String(weekNum).padStart(2, '0');
+  }
+
+  const weeklyDuration = {};
+  const weeklyCost = {};
+  dailyDuration.forEach(d => {
+    const w = isoWeekLabel(d.date);
+    weeklyDuration[w] = (weeklyDuration[w] || 0) + d.ai_duration_hours;
+  });
+  dailyCosts.forEach(d => {
+    const w = isoWeekLabel(d.date);
+    weeklyCost[w] = (weeklyCost[w] || 0) + (d.total || 0) * usdToJpy;
+  });
+
+  const weekLabels = Array.from(new Set([...Object.keys(weeklyDuration), ...Object.keys(weeklyCost)])).sort();
+  const weeklyTargetH = dailyTargetH * 7;
+  const weeklyTargetJPY = dailyTargetJPY * 7;
+
+  newChart('chartKpiWeeklyDuration', {
+    type: 'bar',
+    data: {
+      labels: weekLabels,
+      datasets: [
+        { label: L.ai_duration || 'AI Duration', data: weekLabels.map(w => Math.round((weeklyDuration[w] || 0) * 100) / 100), backgroundColor: '#60a5fa', borderRadius: 2 },
+        { label: L.target_line || 'Target', data: weekLabels.map(() => weeklyTargetH), type: 'line', borderColor: '#ef4444', borderDash: [5,5], pointRadius: 0, borderWidth: 2, fill: false }
+      ]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#94a3b8' } } },
+      scales: { x: scaleDefaults.x, y: { ...scaleDefaults.y, title: { display: true, text: 'hours', color: '#64748b' } } } }
+  });
+
+  newChart('chartKpiWeeklyCost', {
+    type: 'bar',
+    data: {
+      labels: weekLabels,
+      datasets: [
+        { label: L.token_cost || 'Token Cost', data: weekLabels.map(w => Math.round((weeklyCost[w] || 0))), backgroundColor: '#f59e0b', borderRadius: 2 },
+        { label: L.target_line || 'Target', data: weekLabels.map(() => weeklyTargetJPY), type: 'line', borderColor: '#ef4444', borderDash: [5,5], pointRadius: 0, borderWidth: 2, fill: false }
+      ]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#94a3b8' } } },
+      scales: { x: scaleDefaults.x, y: { ...scaleDefaults.y, title: { display: true, text: '\u00a5', color: '#64748b' } } } }
+  });
+
+  // ── Monthly trend (cumulative line with target diagonal) ───────────
+  let cumDuration = 0;
+  let cumCostJPY = 0;
+  const trendLabels = [];
+  const trendDuration = [];
+  const trendCost = [];
+  const trendTargetDuration = [];
+  const trendTargetCost = [];
+
+  dailyDuration.forEach((d, i) => {
+    cumDuration += d.ai_duration_hours;
+    const costEntry = dailyCosts.find(c => c.date === d.date);
+    cumCostJPY += (costEntry ? (costEntry.total || 0) : 0) * usdToJpy;
+    trendLabels.push(d.date);
+    trendDuration.push(Math.round(cumDuration * 100) / 100);
+    trendCost.push(Math.round(cumCostJPY));
+    // Linear target line: day index / total days * target
+    const dayIdx = i + 1;
+    trendTargetDuration.push(Math.round(targetDurationH * dayIdx / periodDays * 100) / 100);
+    trendTargetCost.push(Math.round(targetCostJPY * dayIdx / periodDays));
+  });
+
+  newChart('chartKpiMonthlyTrend', {
+    type: 'line',
+    data: {
+      labels: trendLabels,
+      datasets: [
+        { label: L.ai_duration || 'AI Duration', data: trendDuration, borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.1)', fill: true, tension: 0.3, pointRadius: 2, yAxisID: 'y' },
+        { label: (L.target_line || 'Target') + ' (h)', data: trendTargetDuration, borderColor: '#60a5fa', borderDash: [5,5], pointRadius: 0, borderWidth: 2, fill: false, yAxisID: 'y' },
+        { label: L.token_cost || 'Token Cost', data: trendCost, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', fill: true, tension: 0.3, pointRadius: 2, yAxisID: 'y1' },
+        { label: (L.target_line || 'Target') + ' (\u00a5)', data: trendTargetCost, borderColor: '#f59e0b', borderDash: [5,5], pointRadius: 0, borderWidth: 2, fill: false, yAxisID: 'y1' },
+      ]
+    },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#94a3b8' } } },
+      scales: {
+        x: scaleDefaults.x,
+        y: { ...scaleDefaults.y, position: 'left', title: { display: true, text: 'hours', color: '#64748b' } },
+        y1: { ...scaleDefaults.y, position: 'right', title: { display: true, text: '\u00a5', color: '#64748b' }, grid: { drawOnChartArea: false } }
+      }
+    }
+  });
+}
+
 // ── Tab 2: Activity ────────────────────────────────────────────────────
 function renderActivity() {
   newChart('chartDailyMsgs', {
@@ -2067,6 +2427,9 @@ function renderActivity() {
     options: { responsive: true, maintainAspectRatio: false,
       plugins: { legend: { labels: { color: '#94a3b8' } } }, scales: scaleDefaults }
   });
+
+  addDrillDownHandler('chartDailyMsgs');
+  addDrillDownHandler('chartDailySessions');
 }
 
 // ── Tab 3: Projects ────────────────────────────────────────────────────
@@ -2260,19 +2623,64 @@ function renderSessionList() {
 }
 
 // ── Tab 5: Plan & Billing ──────────────────────────────────────────────
-function renderPlan() {
+function filterPlanData() {
   const plan = D.plan;
+  if (!plan) return null;
+  const { from, to } = getSelectedRange();
+  const filtered = plan.periods.filter(p => p.start <= to && p.end >= from);
+  const totalApi = filtered.reduce((s, p) => s + p.api_cost, 0);
+  const totalPlan = filtered.reduce((s, p) => s + p.plan_cost_usd, 0);
+  const cb = plan.current_billing;
+  const cbVisible = cb && cb.period_start <= to && cb.period_end >= from;
+  return {
+    periods: filtered,
+    current_billing: cbVisible ? cb : null,
+    total_api_cost: Math.round(totalApi * 100) / 100,
+    total_plan_cost: Math.round(totalPlan * 100) / 100,
+    total_savings: Math.round((totalApi - totalPlan) * 100) / 100,
+    overall_roi: totalPlan > 0 ? Math.round(totalApi / totalPlan * 10) / 10 : 0,
+  };
+}
+
+function renderPlan() {
+  const plan = filterPlanData();
   if (!plan) return;
+
+  // Clear all DOM elements
+  const grid = document.getElementById('planKpi');
+  grid.textContent = '';
+  const bp = document.getElementById('billingProgress');
+  bp.textContent = '';
+  const comp = document.getElementById('planComparison');
+  while (comp.childNodes.length > 0) comp.removeChild(comp.lastChild);
+  const compH3 = document.createElement('h3');
+  compH3.textContent = 'API Cost vs. Plan Cost per Billing Period';
+  comp.appendChild(compH3);
+  const tbody = document.getElementById('planTableBody');
+  tbody.textContent = '';
+  destroyChart('chartPlanSavings');
+  destroyChart('chartCostPerDay');
+
+  if (plan.periods.length === 0) {
+    const msg = document.createElement('div');
+    msg.style.cssText = 'color:var(--text2);padding:20px;';
+    msg.textContent = 'No plan periods in selected range.';
+    grid.appendChild(msg);
+    return;
+  }
+
   const cb = plan.current_billing;
 
   // KPI cards
-  const grid = document.getElementById('planKpi');
-  const kpis = [
-    {cls:'plan-type', label:D.locale.plan.current_plan, value:cb.plan, sub:fmtUSD(cb.plan_cost_usd) + D.locale.plan.monthly_suffix + (cb.plan_cost_eur != null ? ' (' + cb.plan_cost_eur.toFixed(2) + ' \\u20ac)' : '')},
+  const kpis = [];
+  if (cb) {
+    kpis.push({cls:'plan-type', label:D.locale.plan.current_plan, value:cb.plan, sub:fmtUSD(cb.plan_cost_usd) + D.locale.plan.monthly_suffix + (cb.plan_cost_eur != null ? ' (' + cb.plan_cost_eur.toFixed(2) + ' \\u20ac)' : '')});
+  }
+  kpis.push(
     {cls:'api-cost', label:D.locale.plan.total_api_cost, value:fmtUSD(plan.total_api_cost), sub:D.locale.plan.total_api_sub},
     {cls:'savings', label:D.locale.plan.total_savings, value:fmtUSD(plan.total_savings), sub:D.locale.plan.total_savings_sub},
     {cls:'roi', label:D.locale.plan.roi_factor, value:plan.overall_roi + 'x', sub:D.locale.plan.roi_sub},
-  ];
+  );
   kpis.forEach(c => {
     const div = document.createElement('div');
     div.className = 'plan-card ' + c.cls;
@@ -2283,45 +2691,45 @@ function renderPlan() {
     grid.appendChild(div);
   });
 
-  // Billing progress
-  const bp = document.getElementById('billingProgress');
-  const pct = Math.min(100, Math.round(cb.days_elapsed / cb.days_total * 100));
-  const barColor = cb.api_cost > cb.plan_cost_usd * 0.8 ? 'var(--green)' : 'var(--accent)';
+  // Billing progress (only if current billing is in range)
+  if (cb) {
+    const pct = Math.min(100, Math.round(cb.days_elapsed / cb.days_total * 100));
+    const barColor = cb.api_cost > cb.plan_cost_usd * 0.8 ? 'var(--green)' : 'var(--accent)';
 
-  const h3 = document.createElement('h3');
-  h3.textContent = D.locale.plan.billing_period + ' (' + cb.period_start + ' \u2013 ' + cb.period_end + ')';
-  bp.appendChild(h3);
+    const h3 = document.createElement('h3');
+    h3.textContent = D.locale.plan.billing_period + ' (' + cb.period_start + ' \u2013 ' + cb.period_end + ')';
+    bp.appendChild(h3);
 
-  const outer = document.createElement('div'); outer.className = 'progress-bar-outer';
-  const inner = document.createElement('div'); inner.className = 'progress-bar-inner';
-  inner.style.width = pct + '%';
-  inner.style.background = 'linear-gradient(90deg, var(--accent), ' + barColor + ')';
-  inner.textContent = pct + '%';
-  outer.appendChild(inner);
-  bp.appendChild(outer);
+    const outer = document.createElement('div'); outer.className = 'progress-bar-outer';
+    const inner = document.createElement('div'); inner.className = 'progress-bar-inner';
+    inner.style.width = pct + '%';
+    inner.style.background = 'linear-gradient(90deg, var(--accent), ' + barColor + ')';
+    inner.textContent = pct + '%';
+    outer.appendChild(inner);
+    bp.appendChild(outer);
 
-  const stats = document.createElement('div'); stats.className = 'progress-stats';
-  const statItems = [
-    {label:D.locale.plan.day, val:cb.days_elapsed + ' / ' + cb.days_total},
-    {label:D.locale.plan.api_cost_so_far, val:fmtUSD(cb.api_cost)},
-    {label:D.locale.plan.projected, val:fmtUSD(cb.projected_cost)},
-    {label:D.locale.plan.savings_so_far, val:fmtUSD(cb.savings)},
-    {label:D.locale.plan.roi, val:cb.roi_factor + 'x'},
-    {label:D.locale.plan.sessions, val:String(cb.sessions)},
-    {label:D.locale.plan.messages, val:fmt(cb.messages)},
-    {label:D.locale.plan.avg_per_day, val:fmtUSD(cb.cost_per_day)},
-  ];
-  statItems.forEach(s => {
-    const item = document.createElement('div'); item.className = 'stat-item';
-    const lbl = document.createElement('span'); lbl.textContent = s.label;
-    const val = document.createElement('span'); val.className = 'stat-val'; val.textContent = s.val;
-    item.appendChild(lbl); item.appendChild(val);
-    stats.appendChild(item);
-  });
-  bp.appendChild(stats);
+    const stats = document.createElement('div'); stats.className = 'progress-stats';
+    const statItems = [
+      {label:D.locale.plan.day, val:cb.days_elapsed + ' / ' + cb.days_total},
+      {label:D.locale.plan.api_cost_so_far, val:fmtUSD(cb.api_cost)},
+      {label:D.locale.plan.projected, val:fmtUSD(cb.projected_cost)},
+      {label:D.locale.plan.savings_so_far, val:fmtUSD(cb.savings)},
+      {label:D.locale.plan.roi, val:cb.roi_factor + 'x'},
+      {label:D.locale.plan.sessions, val:String(cb.sessions)},
+      {label:D.locale.plan.messages, val:fmt(cb.messages)},
+      {label:D.locale.plan.avg_per_day, val:fmtUSD(cb.cost_per_day)},
+    ];
+    statItems.forEach(s => {
+      const item = document.createElement('div'); item.className = 'stat-item';
+      const lbl = document.createElement('span'); lbl.textContent = s.label;
+      const val = document.createElement('span'); val.className = 'stat-val'; val.textContent = s.val;
+      item.appendChild(lbl); item.appendChild(val);
+      stats.appendChild(item);
+    });
+    bp.appendChild(stats);
+  }
 
   // Comparison bars
-  const comp = document.getElementById('planComparison');
   const maxApi = Math.max(...plan.periods.map(p => p.api_cost), 1);
 
   plan.periods.forEach(p => {
@@ -2366,7 +2774,7 @@ function renderPlan() {
   // Charts
   const periodLabels = plan.periods.map(p => p.plan + ' (' + p.start.slice(5) + ')');
 
-  new Chart(document.getElementById('chartPlanSavings'), {
+  newChart('chartPlanSavings', {
     type: 'bar',
     data: {
       labels: periodLabels,
@@ -2380,7 +2788,7 @@ function renderPlan() {
       scales: { x: scaleDefaults.x, y: { ...scaleDefaults.y, title: { display: true, text: 'USD', color: '#64748b' } } } }
   });
 
-  new Chart(document.getElementById('chartCostPerDay'), {
+  newChart('chartCostPerDay', {
     type: 'bar',
     data: {
       labels: periodLabels,
@@ -2394,7 +2802,6 @@ function renderPlan() {
   });
 
   // Period table
-  const tbody = document.getElementById('planTableBody');
   plan.periods.forEach(p => {
     const tr = document.createElement('tr');
     const cells = [
@@ -2605,7 +3012,6 @@ document.getElementById('filterSearch').addEventListener('input', () => { sessio
 // ── Init ───────────────────────────────────────────────────────────────
 initTabs();
 initPeriodFilter();
-renderPlan();
 renderAll();
 </script>
 </body>

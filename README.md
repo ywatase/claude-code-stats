@@ -6,6 +6,7 @@ A comprehensive analytics dashboard for [Claude Code](https://docs.anthropic.com
 
 ## Features
 
+- **Period Filter** -- Filter all views by date range (7d / 30d / 90d / all time)
 - **KPI Dashboard** -- Total API-equivalent cost, messages, sessions, output tokens
 - **Token & API Value** -- Daily costs, cumulative costs, model distribution
 - **Activity** -- Message patterns, hourly distribution, weekday distribution
@@ -54,6 +55,7 @@ See [`config.example.json`](config.example.json) for all options:
 |-----|------|---------|-------------|
 | `language` | `string` | `"en"` | UI language (`"en"` or `"de"`) |
 | `plan_history` | `array` | `[]` | Your subscription plan history |
+| `extra_session_dirs` | `array` | `[]` | Additional `.claude` directories to include (e.g. Docker containers) |
 | `migration.enabled` | `bool` | `false` | Enable data from a migration backup |
 | `migration.dir` | `string` | `null` | Path to migration backup directory |
 
