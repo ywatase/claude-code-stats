@@ -22,6 +22,11 @@
     "/path/to/docker/container/.claude",
     "/path/to/another/.claude"
   ],
+  "kpi_targets": {
+    "monthly_ai_duration_hours": 160,
+    "monthly_cost_jpy": 100000,
+    "usd_to_jpy": 150
+  },
   "migration": {
     "enabled": false,
     "dir": null,

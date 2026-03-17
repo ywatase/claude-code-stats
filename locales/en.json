@@ -22,7 +22,8 @@
     "projects": "Projects",
     "sessions": "Sessions",
     "plan": "Plan & Billing",
-    "insights": "Insights"
+    "insights": "Insights",
+    "kpi_dashboard": "KPI Dashboard"
   },
   "period": {
     "label": "Period",
@@ -125,6 +126,24 @@
     "plan_cost_label": "Plan Cost",
     "api_cost_per_day_label": "API Cost/Day",
     "total": "Total"
+  },
+  "kpi_dashboard": {
+    "ai_duration": "AI Working Time",
+    "token_cost": "Token Cost",
+    "target": "Target",
+    "progress": "Progress",
+    "daily_avg": "Daily Avg",
+    "remaining": "Remaining",
+    "projected": "Projected",
+    "daily_duration": "Daily AI Duration (hours)",
+    "daily_cost": "Daily Token Cost",
+    "weekly_duration": "Weekly AI Duration (hours)",
+    "weekly_cost": "Weekly Token Cost",
+    "monthly_trend": "Monthly Progress Trend",
+    "target_line": "Target",
+    "on_track": "On Track",
+    "behind": "Behind",
+    "ahead": "Ahead"
   },
   "insights": {
     "tool_usage": "Tool Usage (Top 20)",
