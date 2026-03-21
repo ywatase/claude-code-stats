@@ -38,23 +38,27 @@ A comprehensive analytics dashboard for [Claude Code](https://docs.anthropic.com
 ## Quick Start
 
 1. **Clone the repository**
+
    ```bash
    git clone https://github.com/AeternaLabsHQ/claude-code-stats.git
    cd claude-code-stats
    ```
 
 2. **Create your configuration**
+
    ```bash
    cp config.example.json config.json
    ```
-   Edit `config.json` to match your subscription plan and preferences.
 
+   Edit `config.json` to match your subscription plan and preferences.
 3. **Run the extractor**
+
    ```bash
    python3 extract_stats.py
    ```
 
 4. **Open the dashboard**
+
    ```bash
    open public/index.html      # macOS
    xdg-open public/index.html  # Linux
@@ -69,6 +73,8 @@ See [`config.example.json`](config.example.json) for all options:
 |-----|------|---------|-------------|
 | `language` | `string` | `"en"` | UI language (`"en"` or `"de"`) |
 | `plan_history` | `array` | `[]` | Your subscription plan history |
+| `extra_session_dirs` | `array` | `[]` | Additional `.claude` directories to include (e.g. Docker containers) |
+| `kpi_targets` | `object` | `{}` | KPI target settings (`monthly_ai_duration_hours`, `monthly_cost_jpy`, `usd_to_jpy`) |
 | `migration.enabled` | `bool` | `false` | Enable data from a migration backup |
 | `migration.dir` | `string` | `null` | Path to migration backup directory |
 

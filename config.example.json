@@ -6,8 +6,8 @@
       "plan": "Pro",
       "start": "2025-01-01",
       "end": "2025-01-31",
-      "cost_eur": 18.00,
-      "cost_usd": 20.00,
+      "cost_eur": 18.0,
+      "cost_usd": 20.0,
       "billing_day": null
     },
     {
@@ -15,7 +15,7 @@
       "start": "2025-02-01",
       "end": null,
       "cost_eur": 87.61,
-      "cost_usd": 93.00,
+      "cost_usd": 93.0,
       "billing_day": 1
     }
   ],
@@ -24,5 +24,14 @@
     "dir": null,
     "claude_dir_name": ".claude-windows",
     "dot_claude_json_name": ".claude-windows.json"
+  },
+  "extra_session_dirs": [
+    "/path/to/docker/container/.claude",
+    "/path/to/another/.claude"
+  ],
+  "kpi_targets": {
+    "monthly_ai_duration_hours": 160,
+    "monthly_cost_jpy": 100000,
+    "usd_to_jpy": 150
   }
 }

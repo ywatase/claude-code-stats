@@ -14,7 +14,7 @@ import re
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ── Configuration ──────────────────────────────────────────────────────────
@@ -54,6 +54,11 @@ DOT_CLAUDE_JSON = Path(os.path.expanduser("~/.claude.json"))
 STATS_CACHE = CLAUDE_DIR / "stats-cache.json"
 HISTORY_JSONL = CLAUDE_DIR / "history.jsonl"
 
+# ── Extra Session Directories (optional, configured in config.json) ───────
+EXTRA_SESSION_DIRS = [
+    Path(os.path.expanduser(d)) for d in CONFIG.get("extra_session_dirs", []) if d
+]
+
 # ── Migration Backup (optional, configured in config.json) ───────────────
 _mig = CONFIG.get("migration", {})
 MIGRATION_ENABLED = _mig.get("enabled", False)
@@ -82,6 +87,14 @@ TEMPLATE_HTML = Path(__file__).parent / "dashboard_template.html"
 
 # ── Plan Configuration (from config.json) ────────────────────────────────
 PLAN_HISTORY = CONFIG.get("plan_history", [])
+
+# ── KPI Targets (from config.json) ───────────────────────────────────────
+_kpi = CONFIG.get("kpi_targets", {})
+KPI_TARGETS = {
+    "monthly_ai_duration_hours": _kpi.get("monthly_ai_duration_hours", 160),
+    "monthly_cost_jpy": _kpi.get("monthly_cost_jpy", 100000),
+    "usd_to_jpy": _kpi.get("usd_to_jpy", 150),
+}
 
 # ── Pricing (USD per 1M tokens) ───────────────────────────────────────────
 PRICING = {
@@ -163,7 +176,46 @@ DEFAULT_PRICING = {
 
 
 def get_model_display(model_id):
-    return PRICING.get(model_id, DEFAULT_PRICING)["display"]
+    return get_model_pricing(model_id)["display"]
+
+
+def normalize_model_id(model_id):
+    """Normalize model ids across version/date-suffixed variants."""
+    if not isinstance(model_id, str):
+        return ""
+
+    model_id = model_id.strip()
+    if not model_id:
+        return ""
+
+    if model_id in PRICING:
+        return model_id
+
+    # Strip known provider prefix, e.g. "anthropic/claude-sonnet-4-6".
+    if "/" in model_id:
+        model_id = model_id.rsplit("/", 1)[-1]
+        if model_id in PRICING:
+            return model_id
+
+    # Normalize date-suffixed ids, e.g. "...-20250929" -> base model id.
+    base_model = re.sub(r"-\d{8}$", "", model_id)
+    if base_model in PRICING:
+        return base_model
+
+    # Normalize shorthand ids, e.g. "claude-sonnet-4-5" -> latest dated variant.
+    if base_model == "claude-sonnet-4-5":
+        return "claude-sonnet-4-5-20250929"
+    if base_model == "claude-haiku-4-5":
+        return "claude-haiku-4-5-20251001"
+    if base_model == "claude-opus-4-5":
+        return "claude-opus-4-5-20251101"
+
+    return model_id
+
+
+def get_model_pricing(model_id):
+    normalized = normalize_model_id(model_id)
+    return PRICING.get(normalized, DEFAULT_PRICING)
 
 
 def calc_cost(model_id, usage):
@@ -172,7 +224,7 @@ def calc_cost(model_id, usage):
     Uses the standard cache write rate (1.25x input price) for all cache
     creation tokens, matching Claude Code's own cost calculation.
     """
-    p = PRICING.get(model_id, DEFAULT_PRICING)
+    p = get_model_pricing(model_id)
 
     input_tokens = usage.get("input_tokens", 0)
     output_tokens = usage.get("output_tokens", 0)
@@ -706,6 +758,12 @@ def parse_session_transcripts():
         sources.append(("migration", MIGRATION_PROJECTS_DIR))
     if PROJECTS_DIR.exists():
         sources.append(("current", PROJECTS_DIR))
+    for i, extra_dir in enumerate(EXTRA_SESSION_DIRS):
+        projects_subdir = extra_dir / "projects"
+        if projects_subdir.exists():
+            sources.append((f"extra-{i}:{extra_dir.name}", projects_subdir))
+        elif extra_dir.exists():
+            print(f"  WARNING: {extra_dir} exists but has no 'projects' subdirectory")
 
     if not sources:
         print(f"  WARNING: No projects directories found")
@@ -768,6 +826,7 @@ def parse_session_transcripts():
                                     "project_dir": project_name,
                                     "project_path": obj.get("cwd", ""),
                                     "timestamps": [],
+                                    "typed_timestamps": [],
                                     "models": defaultdict(lambda: {
                                         "input_tokens": 0,
                                         "output_tokens": 0,
@@ -814,6 +873,7 @@ def parse_session_transcripts():
                                 sess["slug"] = obj["slug"]
 
                             # Collect timestamps
+                            ts_ms = None
                             if timestamp:
                                 if isinstance(timestamp, str):
                                     try:
@@ -823,7 +883,12 @@ def parse_session_transcripts():
                                     except (ValueError, OSError):
                                         pass
                                 elif isinstance(timestamp, (int, float)):
-                                    sess["timestamps"].append(int(timestamp))
+                                    ts_ms = int(timestamp)
+                                    sess["timestamps"].append(ts_ms)
+
+                            # Track typed timestamps for AI turn duration
+                            if ts_ms and msg_type in ("user", "assistant"):
+                                sess["typed_timestamps"].append((msg_type, ts_ms))
 
                             # User messages
                             if msg_type == "user":
@@ -878,7 +943,7 @@ def parse_session_transcripts():
                                 sess["assistant_message_count"] += 1
 
                                 message = obj.get("message", {})
-                                model = message.get("model", "unknown")
+                                model = normalize_model_id(message.get("model", "unknown"))
                                 usage = message.get("usage", {})
 
                                 if usage and usage.get("output_tokens", 0) > 0:
@@ -987,7 +1052,31 @@ def parse_session_transcripts():
     current_count = sum(1 for s in sessions.values() if s.get("source") == "current")
     print(f"  Parsed {total_files} files, {total_lines} lines, {len(sessions)} sessions"
           f" (migration: {migration_count}, current: {current_count})")
+    # Calculate AI turn duration for each session
+    for sess in sessions.values():
+        sess["ai_turn_duration_ms"] = _calc_ai_turn_duration(sess["typed_timestamps"])
+
     return sessions
+
+
+def _calc_ai_turn_duration(typed_timestamps):
+    """Calculate total AI turn time from typed timestamp pairs."""
+    if not typed_timestamps:
+        return 0
+
+    total_ms = 0
+    last_user_ts = None
+
+    for msg_type, ts in typed_timestamps:
+        if msg_type == "user":
+            last_user_ts = ts
+        elif msg_type == "assistant" and last_user_ts is not None:
+            turn_ms = ts - last_user_ts
+            if 0 < turn_ms < 30 * 60 * 1000:
+                total_ms += turn_ms
+            last_user_ts = None
+
+    return total_ms
 
 
 def extract_session_messages(session_id, project_dir_name):
@@ -1393,6 +1482,7 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
             "errors": [{"message": e["message"], "tool": e.get("tool", "unknown"), "category": e.get("category", "other"), "timestamp": e.get("timestamp", "")} for e in sess.get("errors", [])],
             "file_ops_count": len(sess.get("file_ops", [])),
             "git_ops": sess.get("git_ops", []),
+            "ai_duration_min": round(sess.get("ai_turn_duration_ms", 0) / 60000, 1),
         })
 
     session_list.sort(key=lambda s: s["start"])
@@ -1555,6 +1645,9 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
     # ── Actual plan cost for KPI ─────────────────────────────────────────
     actual_plan_cost = plan_analysis.get("total_plan_cost", 0)
 
+    total_ai_duration_ms = sum(s.get("ai_duration_min", 0) * 60000 for s in session_list)
+    total_ai_duration_hours = round(total_ai_duration_ms / 3_600_000, 2)
+
     data = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "locale": LOCALE,
@@ -1572,7 +1665,9 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
             "first_session": all_dates[0] if all_dates else "",
             "last_session": all_dates[-1] if all_dates else "",
             "total_projects": len(project_list),
+            "total_ai_duration_hours": total_ai_duration_hours,
         },
+        "kpi_targets": KPI_TARGETS,
         "plan": plan_analysis,
         "daily_costs": daily_cost_series,
         "cumulative_costs": cumulative_series,
@@ -1850,7 +1945,22 @@ body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui
 
   <div class="tabs" id="tabBar"></div>
 
-  <div class="tab-content active" id="tab-costs">
+  <div class="tab-content active" id="tab-kpi_dashboard">
+    <div id="kpiProgressGrid" class="plan-highlight" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:24px"></div>
+    <div class="chart-grid">
+      <div class="chart-box"><h3>__L_kpi_dashboard_daily_duration__</h3><canvas id="chartKpiDailyDuration"></canvas></div>
+      <div class="chart-box"><h3>__L_kpi_dashboard_daily_cost__</h3><canvas id="chartKpiDailyCost"></canvas></div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-box"><h3>__L_kpi_dashboard_weekly_duration__</h3><canvas id="chartKpiWeeklyDuration"></canvas></div>
+      <div class="chart-box"><h3>__L_kpi_dashboard_weekly_cost__</h3><canvas id="chartKpiWeeklyCost"></canvas></div>
+    </div>
+    <div class="chart-grid full">
+      <div class="chart-box tall"><h3>__L_kpi_dashboard_monthly_trend__</h3><canvas id="chartKpiMonthlyTrend"></canvas></div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-costs">
     <div class="chart-grid full">
       <div class="chart-box"><h3>__L_costs_daily_cost__</h3><canvas id="chartDailyCost"></canvas></div>
     </div>
@@ -2215,6 +2325,7 @@ function filterData(days, projectFilter) {
     total_input_tokens: totalInputTokens,
     first_session: dates.length > 0 ? dates[0] : D.kpi.first_session,
     last_session: dates.length > 0 ? dates[dates.length - 1] : D.kpi.last_session,
+    total_ai_duration_hours: F.sessions.reduce((s, x) => s + (x.ai_duration_min || 0), 0) / 60,
   };
 
   // Recalculate agent_summary from filtered sessions
@@ -2289,6 +2400,7 @@ function applyFilter(days, projectFilter) {
 
   // Re-render (but NOT renderPlan)
   renderKPI();
+  renderKpiDashboard();
   renderCosts();
   renderActivity();
   renderProjects();
@@ -2311,6 +2423,77 @@ function renderToolUsageChart() {
           y: { ...scaleDefaults.y, ticks: { font: { size: 11 } } } } }
     });
   }
+}
+
+function utcDateString(dt) { return dt.getUTCFullYear() + '-' + String(dt.getUTCMonth()+1).padStart(2,'0') + '-' + String(dt.getUTCDate()).padStart(2,'0'); }
+
+// ── KPI Dashboard ──────────────────────────────────────────────────────
+function fmtJPY(n) { return '\u00a5' + Math.round(n).toLocaleString(D.locale.locale_code); }
+
+function renderKpiDashboard() {
+  ['kpiDailyDur','kpiDailyCost','kpiWeekDur','kpiWeekCost','kpiTrend'].forEach(k => { if (charts[k]) { charts[k].destroy(); charts[k] = null; } });
+  const L = D.locale.kpi_dashboard || {};
+  const targets = D.kpi_targets || { monthly_ai_duration_hours: 160, monthly_cost_jpy: 100000, usd_to_jpy: 150 };
+  const from = F.kpi.first_session; const to = F.kpi.last_session;
+  const fromDt = new Date(from + 'T00:00:00Z');
+  const toDt = new Date(to + 'T00:00:00Z');
+  const periodDays = Math.max(1, Math.floor((toDt - fromDt) / 86400000) + 1);
+  const isThisMonth = fromDt.getUTCDate() === 1 && fromDt.getUTCMonth() === toDt.getUTCMonth() && fromDt.getUTCFullYear() === toDt.getUTCFullYear();
+  const daysInMonth = isThisMonth ? new Date(Date.UTC(fromDt.getUTCFullYear(), fromDt.getUTCMonth() + 1, 0)).getUTCDate() : 30;
+  const targetDurationH = targets.monthly_ai_duration_hours * periodDays / daysInMonth;
+  const targetCostJPY = targets.monthly_cost_jpy * periodDays / daysInMonth;
+  const usdToJpy = targets.usd_to_jpy || 150;
+  const actualDurationH = F.kpi.total_ai_duration_hours || 0;
+  const actualCostUSD = F.kpi.total_cost || 0;
+  const actualCostJPY = actualCostUSD * usdToJpy;
+  const today = new Date(); const todayStr = utcDateString(today);
+  const effectiveTo = todayStr < to ? todayStr : to;
+  const elapsedDays = Math.max(1, Math.floor((new Date(effectiveTo + 'T00:00:00Z') - fromDt) / 86400000) + 1);
+  const periodProgressRatio = elapsedDays / periodDays;
+  const dailyAvgDuration = actualDurationH / elapsedDays;
+  const dailyAvgCostJPY = actualCostJPY / elapsedDays;
+  const projectedDuration = dailyAvgDuration * periodDays;
+  const projectedCostJPY = dailyAvgCostJPY * periodDays;
+  const remainDuration = Math.max(0, targetDurationH - actualDurationH);
+  const remainCostJPY = Math.max(0, targetCostJPY - actualCostJPY);
+  const durationRatio = targetDurationH > 0 ? actualDurationH / targetDurationH : 0;
+  const costRatio = targetCostJPY > 0 ? actualCostJPY / targetCostJPY : 0;
+  function progressColor(r) { if (r < periodProgressRatio * 0.8) return '#ef4444'; if (r < periodProgressRatio * 1.2) return '#eab308'; return '#22c55e'; }
+  function statusLabel(r) { if (r < periodProgressRatio * 0.8) return L.behind || 'Behind'; if (r < periodProgressRatio * 1.2) return L.on_track || 'On Track'; return L.ahead || 'Ahead'; }
+  function buildCard(title, actual, target, ratio, dailyAvg, remaining, projected) {
+    const color = progressColor(ratio), status = statusLabel(ratio), pct = Math.round(ratio * 100);
+    return '<div class="plan-card" style="background:var(--bg2);border-radius:12px;padding:20px">' +
+      '<div style="font-size:0.85rem;color:#94a3b8;margin-bottom:4px">' + escHtml(title) + '</div>' +
+      '<div class="value" style="font-size:1.8rem;font-weight:700;color:#f1f5f9">' + actual + '</div>' +
+      '<div style="margin:8px 0;font-size:0.8rem;color:#64748b">' + (L.target||'Target') + ': ' + target + '</div>' +
+      '<div style="background:#1e293b;border-radius:6px;height:10px;overflow:hidden;margin-bottom:8px"><div style="width:'+Math.min(pct,100)+'%;height:100%;background:'+color+';border-radius:6px"></div></div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:0.75rem;color:#94a3b8"><span>'+pct+'% - '+escHtml(status)+'</span></div>' +
+      '<div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:0.75rem">' +
+        '<div><span style="color:#64748b">'+(L.daily_avg||'Daily Avg')+'</span><br><span style="color:#f1f5f9">'+dailyAvg+'</span></div>' +
+        '<div><span style="color:#64748b">'+(L.remaining||'Remaining')+'</span><br><span style="color:#f1f5f9">'+remaining+'</span></div>' +
+        '<div><span style="color:#64748b">'+(L.projected||'Projected')+'</span><br><span style="color:#f1f5f9">'+projected+'</span></div>' +
+      '</div></div>';
+  }
+  const grid = document.getElementById('kpiProgressGrid');
+  grid.innerHTML = buildCard(L.ai_duration||'AI Working Time', actualDurationH.toFixed(1)+'h', targetDurationH.toFixed(0)+'h', durationRatio, dailyAvgDuration.toFixed(1)+'h', remainDuration.toFixed(1)+'h', projectedDuration.toFixed(1)+'h')
+    + buildCard(L.token_cost||'Token Cost', fmtJPY(actualCostJPY), fmtJPY(targetCostJPY), costRatio, fmtJPY(dailyAvgCostJPY), fmtJPY(remainCostJPY), fmtJPY(projectedCostJPY)+' ('+fmtUSD(actualCostUSD)+')');
+  // Daily charts
+  const dailyDuration = F.daily_costs.map(d => ({date:d.date, ai_duration_hours: (F.sessions||D.sessions).filter(s=>s.date===d.date).reduce((a,s)=>(a+(s.ai_duration_min||0)/60),0)}));
+  const dailyCosts = F.daily_costs;
+  const dailyTargetH = targetDurationH / periodDays;
+  const dailyTargetJPY = targetCostJPY / periodDays;
+  charts.kpiDailyDur = new Chart(document.getElementById('chartKpiDailyDuration'), {type:'bar',data:{labels:dailyDuration.map(d=>d.date),datasets:[{label:L.ai_duration||'AI Duration',data:dailyDuration.map(d=>Math.round(d.ai_duration_hours*100)/100),backgroundColor:'#60a5fa',borderRadius:2},{label:L.target_line||'Target',data:dailyDuration.map(()=>dailyTargetH),type:'line',borderColor:'#ef4444',borderDash:[5,5],pointRadius:0,borderWidth:2,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#94a3b8'}}},scales:{x:scaleDefaults.x,y:{...scaleDefaults.y,title:{display:true,text:'hours',color:'#64748b'}}}}});
+  charts.kpiDailyCost = new Chart(document.getElementById('chartKpiDailyCost'), {type:'bar',data:{labels:dailyCosts.map(d=>d.date),datasets:[{label:L.token_cost||'Token Cost',data:dailyCosts.map(d=>(d.total||0)*usdToJpy),backgroundColor:'#f59e0b',borderRadius:2},{label:L.target_line||'Target',data:dailyCosts.map(()=>dailyTargetJPY),type:'line',borderColor:'#ef4444',borderDash:[5,5],pointRadius:0,borderWidth:2,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#94a3b8'}}},scales:{x:scaleDefaults.x,y:{...scaleDefaults.y,title:{display:true,text:'\u00a5',color:'#64748b'}}}}});
+  // Weekly
+  function isoWeekLabel(ds){const dt=new Date(ds+'T00:00:00Z');const thu=new Date(Date.UTC(dt.getUTCFullYear(),dt.getUTCMonth(),dt.getUTCDate()));thu.setUTCDate(thu.getUTCDate()+3-(thu.getUTCDay()+6)%7);const ys=new Date(Date.UTC(thu.getUTCFullYear(),0,4));const wn=Math.ceil(((thu-ys)/86400000+1)/7);return thu.getUTCFullYear()+'-W'+String(wn).padStart(2,'0');}
+  const wd={},wc={}; dailyDuration.forEach(d=>{const w=isoWeekLabel(d.date);wd[w]=(wd[w]||0)+d.ai_duration_hours;}); dailyCosts.forEach(d=>{const w=isoWeekLabel(d.date);wc[w]=(wc[w]||0)+(d.total||0)*usdToJpy;});
+  const wl=Array.from(new Set([...Object.keys(wd),...Object.keys(wc)])).sort(),wtH=dailyTargetH*7,wtJ=dailyTargetJPY*7;
+  charts.kpiWeekDur=new Chart(document.getElementById('chartKpiWeeklyDuration'),{type:'bar',data:{labels:wl,datasets:[{label:L.ai_duration||'AI Duration',data:wl.map(w=>Math.round((wd[w]||0)*100)/100),backgroundColor:'#60a5fa',borderRadius:2},{label:L.target_line||'Target',data:wl.map(()=>wtH),type:'line',borderColor:'#ef4444',borderDash:[5,5],pointRadius:0,borderWidth:2,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#94a3b8'}}},scales:{x:scaleDefaults.x,y:{...scaleDefaults.y,title:{display:true,text:'hours',color:'#64748b'}}}}});
+  charts.kpiWeekCost=new Chart(document.getElementById('chartKpiWeeklyCost'),{type:'bar',data:{labels:wl,datasets:[{label:L.token_cost||'Token Cost',data:wl.map(w=>Math.round(wc[w]||0)),backgroundColor:'#f59e0b',borderRadius:2},{label:L.target_line||'Target',data:wl.map(()=>wtJ),type:'line',borderColor:'#ef4444',borderDash:[5,5],pointRadius:0,borderWidth:2,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#94a3b8'}}},scales:{x:scaleDefaults.x,y:{...scaleDefaults.y,title:{display:true,text:'\u00a5',color:'#64748b'}}}}});
+  // Monthly trend
+  let cumD=0,cumC=0;const tl=[],td=[],tc=[],ttd=[],ttc=[];
+  dailyDuration.forEach((d,i)=>{cumD+=d.ai_duration_hours;const ce=dailyCosts.find(c=>c.date===d.date);cumC+=(ce?(ce.total||0):0)*usdToJpy;tl.push(d.date);td.push(Math.round(cumD*100)/100);tc.push(Math.round(cumC));const di=i+1;ttd.push(Math.round(targetDurationH*di/periodDays*100)/100);ttc.push(Math.round(targetCostJPY*di/periodDays));});
+  charts.kpiTrend=new Chart(document.getElementById('chartKpiMonthlyTrend'),{type:'line',data:{labels:tl,datasets:[{label:L.ai_duration||'AI Duration',data:td,borderColor:'#60a5fa',backgroundColor:'rgba(96,165,250,0.1)',fill:true,tension:0.3,pointRadius:2,yAxisID:'y'},{label:(L.target_line||'Target')+' (h)',data:ttd,borderColor:'#60a5fa',borderDash:[5,5],pointRadius:0,borderWidth:2,fill:false,yAxisID:'y'},{label:L.token_cost||'Token Cost',data:tc,borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,0.1)',fill:true,tension:0.3,pointRadius:2,yAxisID:'y1'},{label:(L.target_line||'Target')+' (\u00a5)',data:ttc,borderColor:'#f59e0b',borderDash:[5,5],pointRadius:0,borderWidth:2,fill:false,yAxisID:'y1'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#94a3b8'}}},scales:{x:scaleDefaults.x,y:{...scaleDefaults.y,position:'left',title:{display:true,text:'hours',color:'#64748b'}},y1:{...scaleDefaults.y,position:'right',title:{display:true,text:'\u00a5',color:'#64748b'},grid:{drawOnChartArea:false}}}}});
 }
 
 // ── KPI Cards ──────────────────────────────────────────────────────────
@@ -2341,6 +2524,7 @@ function renderKPI() {
 
 // ── Tabs ───────────────────────────────────────────────────────────────
 const TAB_NAMES = [
+  {id:'kpi_dashboard', label:D.locale.tabs.kpi_dashboard},
   {id:'costs', label:D.locale.tabs.costs},
   {id:'activity', label:D.locale.tabs.activity},
   {id:'projects', label:D.locale.tabs.projects},
@@ -3304,6 +3488,7 @@ document.getElementById('projectFilter').addEventListener('input', function() {
 });
 initTabs();
 renderKPI();
+renderKpiDashboard();
 renderCosts();
 renderActivity();
 renderProjects();
