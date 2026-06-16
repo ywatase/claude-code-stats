@@ -198,6 +198,12 @@ KPI_TARGETS = {
 
 # ── Pricing (USD per 1M tokens) ───────────────────────────────────────────
 PRICING = {
+    # Claude Fable 5
+    "claude-fable-5": {
+        "input": 10.00, "output": 50.00,
+        "cache_read": 1.00, "cache_write_5m": 12.50, "cache_write_1h": 20.00,
+        "display": "Fable 5"
+    },
     # Claude 4.7
     "claude-opus-4-7": {
         "input": 5.00, "output": 25.00,
