@@ -24,13 +24,16 @@ repos:
     hooks:
       - id: prettier
         files: \.(js|ts|jsx|tsx|css|scss|json|yaml|yml)$
-        exclude: package-lock\.json$
+        # lockfile は自動生成物のため整形対象外
+        exclude: (package-lock\.json|pnpm-lock\.yaml)$
 
   - repo: https://github.com/rvben/rumdl-pre-commit
     rev: v0.1.28
     hooks:
       # - id: rumdl      # Lint only (fails on issues)
       - id: rumdl-fmt # Auto-format and fail if issues remain
+        # README.md は upstream 管理のため対象外
+        exclude: ^README\.md$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.5
