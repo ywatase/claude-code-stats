@@ -25,7 +25,8 @@
     "sessions": "Sessions",
     "plan": "Plan & Abrechnung",
     "insights": "Insights",
-    "agents": "Agenten"
+    "agents": "Agenten",
+    "kpi_dashboard": "KPI-Dashboard"
   },
   "costs": {
     "daily_cost": "API-Wert pro Tag nach Modell",
@@ -193,5 +194,23 @@
     "th_reads": "Reads",
     "th_edits": "Edits",
     "th_writes": "Writes"
+  },
+  "kpi_dashboard": {
+    "ai_duration": "KI-Arbeitszeit",
+    "token_cost": "Token-Kosten",
+    "target": "Ziel",
+    "progress": "Fortschritt",
+    "daily_avg": "Tagesdurchschnitt",
+    "remaining": "Verbleibend",
+    "projected": "Hochrechnung",
+    "daily_duration": "Tägliche KI-Dauer (Stunden)",
+    "daily_cost": "Tägliche Token-Kosten",
+    "weekly_duration": "Wöchentliche KI-Dauer (Stunden)",
+    "weekly_cost": "Wöchentliche Token-Kosten",
+    "monthly_trend": "Monatlicher Fortschrittstrend",
+    "target_line": "Ziel",
+    "on_track": "Im Plan",
+    "behind": "Zurück",
+    "ahead": "Voraus"
   }
 }
