@@ -1986,14 +1986,20 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
 def generate_dashboard(data):
     """Generate self-contained HTML dashboard with embedded data."""
     data_json = json.dumps(data, ensure_ascii=False)
+    # Escape "<" for the inline <script> embedding. Why not only "</":
+    # a "<!--" followed by "<script" (common in pasted HTML captured in tool
+    # errors) puts the tokenizer into script-data-double-escaped state, where
+    # even "</script>" no longer closes the tag. "\u003c" is valid in both JSON
+    # and JS string literals, so the decoded data is unchanged.
+    data_json_inline = data_json.replace("<", "\\u003c")
 
     if TEMPLATE_HTML.exists():
         with open(TEMPLATE_HTML, "r", encoding="utf-8") as f:
             template = f.read()
-        html = template.replace("/*__DASHBOARD_DATA__*/", f"const DASHBOARD_DATA = {data_json};")
+        html = template.replace("/*__DASHBOARD_DATA__*/", f"const DASHBOARD_DATA = {data_json_inline};")
         html = _inject_locale(html, LOCALE)
     else:
-        html = build_inline_html(data_json)
+        html = build_inline_html(data_json_inline)
 
     with open(DASHBOARD_HTML, "w", encoding="utf-8") as f:
         f.write(html)
@@ -4269,8 +4275,11 @@ def generate_session_pages(sessions, session_list):
         }, ensure_ascii=False)
 
         html = _get_session_html_template()
+        # See generate_dashboard(): "<" must not reach the inline <script> raw.
+        session_json = session_json.replace("<", "\\u003c")
         html = html.replace('"__SESSION_DATA__"', session_json)
         flow_json = json.dumps(flow_data, ensure_ascii=False, separators=(',', ':'))
+        flow_json = flow_json.replace("<", "\\u003c")
         html = html.replace('"__FLOW_DATA__"', flow_json)
         html = html.replace('__VERSION__', VERSION)
 
@@ -6097,6 +6106,8 @@ def generate_project_pages(session_list, data=None):
         }, ensure_ascii=False)
 
         html = _get_project_html_template()
+        # See generate_dashboard(): "<" must not reach the inline <script> raw.
+        project_json = project_json.replace("<", "\\u003c")
         html = html.replace('"__PROJECT_DATA__"', project_json)
         html = html.replace('__VERSION__', VERSION)
 
