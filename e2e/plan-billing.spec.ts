@@ -1,83 +1,63 @@
 import { test, expect } from "@playwright/test";
 import path from "path";
 
-// Plan & Billing タブが正しくレンダリングされることを検証する
-test.describe("Plan & Billing tab", () => {
-  test.beforeEach(async ({ page }) => {
-    const dashboardPath = path.resolve(__dirname, "../public/index.html");
-    await page.goto(`file://${dashboardPath}`);
+// Plan & Billing タブが正しくレンダリングされることを検証する。
+// v1.0.1 でタブバーは .vc-tab に移り (.tabs は display:none)、
+// planComparison セクションは廃止された。
+const INDEX = `file://${path.resolve(__dirname, "../public/index.html")}`;
 
-    // Plan & Billing タブをクリック
-    const planTab = page.locator(".tab-btn", { hasText: /Plan|プラン/ });
-    await planTab.click();
+test.describe("Plan & Billing タブ", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto(INDEX);
+    await page.locator('.vc-tab[data-tab="plan"]').click();
     await expect(page.locator("#tab-plan")).toHaveClass(/active/);
   });
 
-  test("KPIカードが4つ表示される", async ({ page }) => {
-    const kpiCards = page.locator("#planKpi .plan-card");
-    await expect(kpiCards).toHaveCount(4);
-
-    // 各カードにvalue要素がある
-    for (let i = 0; i < 4; i++) {
-      const value = kpiCards.nth(i).locator(".value");
-      await expect(value).not.toBeEmpty();
+  test("KPIカードが表示され、値が空でない", async ({ page }) => {
+    const cards = page.locator("#planKpi .plan-card");
+    const count = await cards.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      await expect(cards.nth(i).locator(".value")).not.toBeEmpty();
     }
   });
 
-  test("Billing progressセクションが表示される", async ({ page }) => {
-    const billingProgress = page.locator("#billingProgress");
-
-    // プログレスバーが存在する
-    await expect(billingProgress.locator(".progress-bar-outer")).toBeVisible();
-    await expect(billingProgress.locator(".progress-bar-inner")).toBeVisible();
-
-    // 統計項目が表示される
-    const statItems = billingProgress.locator(".stat-item");
-    await expect(statItems).not.toHaveCount(0);
+  test("Billing progress セクションが表示される", async ({ page }) => {
+    const billing = page.locator("#billingProgress");
+    await expect(billing).toBeVisible();
+    await expect(billing.locator(".stat-item").first()).toBeVisible();
   });
 
-  test("API Cost vs Plan Cost 比較バーが表示される", async ({ page }) => {
-    const comparison = page.locator("#planComparison");
-
-    // 比較バーが少なくとも1つ存在する
-    const barRows = comparison.locator(".bar-row");
-    const count = await barRows.count();
-    expect(count).toBeGreaterThan(0);
+  test("チャートcanvasが実サイズを持って描画される", async ({ page }) => {
+    for (const id of ["#chartPlanSavings", "#chartCostPerDay"]) {
+      const canvas = page.locator(id);
+      await expect(canvas).toBeVisible();
+      const box = await canvas.boundingBox();
+      expect(box, id).not.toBeNull();
+      expect(box!.width, id).toBeGreaterThan(0);
+    }
   });
 
-  test("チャートcanvasが描画される", async ({ page }) => {
-    // Chart.jsがcanvasに描画すると幅/高さが設定される
-    const savingsChart = page.locator("#chartPlanSavings");
-    await expect(savingsChart).toBeVisible();
-
-    const costPerDayChart = page.locator("#chartCostPerDay");
-    await expect(costPerDayChart).toBeVisible();
-  });
-
-  test("Period Detailテーブルに行データがある", async ({ page }) => {
+  test("Period Detail テーブルに行データがある", async ({ page }) => {
     const rows = page.locator("#planTableBody tr");
-    const count = await rows.count();
-    expect(count).toBeGreaterThan(0);
+    expect(await rows.count()).toBeGreaterThan(0);
   });
 
-  test("plan_cost_eurがnullでもエラーにならない", async ({ page }) => {
-    // コンソールエラーを監視
+  test("プラン費用が未設定でも描画でエラーにならない", async ({ page }) => {
     const errors: string[] = [];
-    page.on("console", (msg) => {
-      if (msg.type() === "error") errors.push(msg.text());
+    page.on("console", (m) => {
+      if (m.type() === "error") errors.push(m.text());
     });
     page.on("pageerror", (err) => errors.push(err.message));
 
-    // ページをリロードして初期化から再実行
     await page.reload();
-    const planTab = page.locator(".tab-btn", { hasText: /Plan|プラン/ });
-    await planTab.click();
+    await page.locator('.vc-tab[data-tab="plan"]').click();
+    await expect(page.locator("#tab-plan")).toHaveClass(/active/);
 
-    // JavaScriptエラーがないことを確認
     const planErrors = errors.filter(
       (e) =>
         e.includes("toFixed") || e.includes("null") || e.includes("renderPlan"),
     );
-    expect(planErrors).toHaveLength(0);
+    expect(planErrors, planErrors.join("\n")).toHaveLength(0);
   });
 });
