@@ -1,0 +1,53 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+#
+# upstream (AeternaLabsHQ/claude-code-stats) 管理下のパスは **formatter からのみ**
+# 除外する。upstream のコードは当フォークの ruff / prettier 設定に適合しておらず、
+# 整形すると upstream との差分が数万行に膨れて次回の取り込みが不可能になるため。
+# secret 検出や JSON/YAML 構文チェックは upstream 領域にも効かせたいので、
+# トップレベルの exclude ではなく hook 個別に指定する。
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: &upstream ^(extract_stats\.py|claudestats_core/|tests/|templates/|assets/|tools/)
+      - id: end-of-file-fixer
+        exclude: *upstream
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: detect-aws-credentials
+        args:
+          - --allow-missing-credentials
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        files: \.(js|ts|jsx|tsx|css|scss|json|yaml|yml)$
+        # upstream 管理領域 + lockfile (自動生成物) は整形対象外。
+        # config.example.json は upstream が可読性のため 18.00 と書いており、
+        # prettier に通すと 18.0 に丸められて差分が出る。
+        exclude: ^(templates/|assets/|tools/|tests/|config\.example\.json)|(package-lock\.json|pnpm-lock\.yaml)$
+
+  - repo: https://github.com/rvben/rumdl-pre-commit
+    rev: v0.1.28
+    hooks:
+      # - id: rumdl      # Lint only (fails on issues)
+      - id: rumdl-fmt # Auto-format and fail if issues remain
+        # upstream 管理の markdown は対象外 (assets/ 配下の README も含む)
+        exclude: ^(README|MIGRATION|CHANGELOG)\.md$|^assets/
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.5
+    hooks:
+      - id: ruff
+        args: [--fix]
+        exclude: *upstream
+      - id: ruff-format
+        exclude: *upstream
