@@ -4,6 +4,9 @@
 
 - PR は必ず `origin` (ywatase/claude-code-stats) に対して作成すること。`upstream` への PR は禁止。
   - `gh pr create` 実行時は `-R ywatase/claude-code-stats` を指定すること。
+- **`main` は upstream/main のミラー。** 直接コミットも merge もしない。
+  フォークの統合ブランチは `fork`（GitHub の既定ブランチ）。新規 PR の base は `fork`。
+  - フォーク差分は `git diff main..fork` で取れる。
 
 ## フォーク運用
 

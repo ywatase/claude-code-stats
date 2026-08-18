@@ -1,6 +1,26 @@
 # フォーク運用メモ
 
 このリポジトリは [AeternaLabsHQ/claude-code-stats](https://github.com/AeternaLabsHQ/claude-code-stats) のフォークです。
+
+## ブランチ構成
+
+```text
+origin/main   ─●─●─●   = upstream/main。fast-forward のみ、merge を受けない
+                    │
+                    └─○─○─○  origin/fork  ← 既定ブランチ。フォーク独自コミット
+```
+
+| ブランチ | 役割 |
+|---|---|
+| `main` | upstream/main のミラー。**直接コミットも merge もしない。**取り込み時に fast-forward するだけ |
+| `fork` | フォークの統合ブランチ。GitHub の既定ブランチ。新機能 PR はここに向ける |
+
+**この構成にした理由:** `main` をフォークの統合ブランチにしていると、upstream を
+取り込むたびに `main` の履歴を書き換える必要がある。`main` を upstream ミラーに
+すると履歴書き換えが `fork` 側に閉じ込められ、フォーク差分が常に
+`git diff main..fork` で取れる。取り込み PR も、upstream の数百コミットに
+埋もれずフォーク分だけがレビュー対象になる。
+
 現在のベースは **upstream v1.0.1** (`98affc9`)。
 
 ## フォーク独自の変更
@@ -69,17 +89,34 @@ pre-commit の除外を尊重せず、Edit/Write したファイルに `ruff for
 
 ## 次回 upstream を取り込むとき
 
-1. `git fetch upstream`（サンドボックス下では失敗するので無効化して実行）
-2. `git log --oneline fork-base-v1.0.1..upstream/main` で規模を測る
-3. **小規模なら** cherry-pick / merge
-4. **大規模再編なら**「新ベース + 独自変更の再適用」方式。v1.0.1 移行時の手順が
-   `docs/superpowers/plans/2026-08-18-upstream-v1.0.1-migration.md` に残っている
-5. 取り込み後は `git tag -f fork-base-v<version>` を打ち直す
+```bash
+# 1. upstream を取得（サンドボックス下では失敗するので無効化して実行）
+git fetch upstream
+
+# 2. 規模を測る。main は常に「前回取り込んだ upstream」を指している
+git log --oneline main..upstream/main | wc -l
+git diff --stat main upstream/main | tail -1
+
+# 3. main を fast-forward（merge ではない）
+git switch main && git merge --ff-only upstream/main && git push origin main
+
+# 4. fork を新しい main に載せ替える
+git switch fork && git rebase main        # 大規模再編なら下記
+git push --force-with-lease origin fork
+```
+
+**大規模再編（upstream がファイル配置を変えた）なら rebase しない。**
+`main` から新しいブランチを切り、独自変更を担当モジュールへ手で再適用する。
+v0.8.1 → v1.0.1 でこれをやったときの手順が
+`docs/superpowers/plans/2026-08-18-upstream-v1.0.1-migration.md` に残っている。
+upstream の `MIGRATION.md` にフォーク保守者向けの記述があれば必ず読むこと。
+
+`fork-base-v<version>` のようなタグは不要。`main` 自体が常にベースを指す。
 
 参考タグ:
 
-- `fork-base-v1.0.1` — 現在のベースにした upstream タグ
-- `fork-pre-v1.0.1` — v1.0.1 移行前のフォーク先端（v0.8.1 ベース）
+- `fork-pre-v1.0.1` — v1.0.1 移行前のフォーク先端（v0.8.1 ベース、`6c523d8`）
+- `origin/upstream-rebase-20260319` — 旧 `origin/main`（v0.5.0 系、`6067aba`）
 
 ### 検証ゲート
 
@@ -89,7 +126,7 @@ python3 -m pytest tests/ -q          # upstream 同梱 + フォーク追加分
 python3 extract_stats.py             # 実データ生成
 pnpm exec playwright test            # 生成物のブラウザ検証
 pre-commit run --all-files
-git diff --stat v<version> -- extract_stats.py claudestats_core templates tests assets tools locales config.example.json
+git diff --stat main -- extract_stats.py claudestats_core templates tests assets tools locales config.example.json
 ```
 
 最後の diff に出るのは意図した変更だけであること。整形差分が混ざっていたら
