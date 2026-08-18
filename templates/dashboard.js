@@ -639,6 +639,8 @@ function filterData(days, projectFilter) {
     total_cache_write_tokens: totalCacheWriteTokens,
     first_session: dates.length > 0 ? dates[0] : D.kpi.first_session,
     last_session: dates.length > 0 ? dates[dates.length - 1] : D.kpi.last_session,
+    total_ai_duration_hours:
+      F.sessions.reduce((s, x) => s + (x.ai_duration_min || 0), 0) / 60,
   };
 
   // Recalculate agent_summary from filtered sessions
@@ -716,6 +718,7 @@ function applyFilter(days, projectFilter) {
 
   // Re-render (but NOT renderPlan)
   renderKPI();
+  renderGoals();
   renderCosts();
   renderActivity();
   renderProjects();
@@ -893,6 +896,216 @@ function renderKPI() {
   }
 }
 
+// ── KPI Goals (fork-only) ──────────────────────────────────────────────
+// Measures the filtered period against the monthly targets in
+// config.json's kpi_targets, pro-rated to the visible range.
+const GOALS_CHART_KEYS = ['goalsDailyDur', 'goalsDailyCost',
+                          'goalsWeekDur', 'goalsWeekCost', 'goalsTrend'];
+
+function goalsIsoWeek(ds) {
+  const dt = new Date(ds + 'T00:00:00Z');
+  const thu = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+  thu.setUTCDate(thu.getUTCDate() + 3 - (thu.getUTCDay() + 6) % 7);
+  const jan4 = new Date(Date.UTC(thu.getUTCFullYear(), 0, 4));
+  const week = Math.ceil(((thu - jan4) / 86400000 + 1) / 7);
+  return thu.getUTCFullYear() + '-W' + String(week).padStart(2, '0');
+}
+
+// Daily AI minutes keyed by day. Multi-day sessions carry per_day slices
+// (same convention the rest of the dashboard uses); single-day ones fall
+// back to s.date.
+function goalsDailyMinutes(sessions) {
+  const byDay = {};
+  (sessions || []).forEach(s => {
+    if (s.per_day) {
+      Object.entries(s.per_day).forEach(([day, slice]) => {
+        byDay[day] = (byDay[day] || 0) + (slice.ai_duration_min || 0);
+      });
+    } else if (s.date) {
+      byDay[s.date] = (byDay[s.date] || 0) + (s.ai_duration_min || 0);
+    }
+  });
+  return byDay;
+}
+
+function goalsUtcDay(dt) {
+  return dt.getUTCFullYear() + '-' +
+         String(dt.getUTCMonth() + 1).padStart(2, '0') + '-' +
+         String(dt.getUTCDate()).padStart(2, '0');
+}
+
+function renderGoals() {
+  GOALS_CHART_KEYS.forEach(k => {
+    if (charts[k]) { charts[k].destroy(); charts[k] = null; }
+  });
+  const grid = document.getElementById('goalsProgressGrid');
+  if (!grid) return;
+
+  const L = D.locale.goals || {};
+  const targets = D.kpi_targets || {};
+  const monthlyHours = targets.monthly_ai_duration_hours || 160;
+  const monthlyJpy = targets.monthly_cost_jpy || 100000;
+  const usdToJpy = targets.usd_to_jpy || 150;
+  const fmtJpy = n => '¥' + fmt(Math.round(n));
+
+  // Period comes from the day series, not from F.kpi.first_session: a
+  // session's date is its START day, so one long-running session drags
+  // first_session weeks before the visible window (a 7D filter reported a
+  // 44-day period). daily_costs is what the charts below plot, so the cards
+  // and the charts now describe the same span.
+  const series = F.daily_costs || [];
+  const from = series.length ? series[0].date : F.kpi.first_session;
+  const to = series.length ? series[series.length - 1].date : F.kpi.last_session;
+  if (!from || !to) { grid.textContent = ''; return; }
+  const fromDt = new Date(from + 'T00:00:00Z');
+  const toDt = new Date(to + 'T00:00:00Z');
+  const periodDays = Math.max(1, Math.floor((toDt - fromDt) / 86400000) + 1);
+  // A range that is exactly one calendar month is scaled by that month's
+  // real length; anything else uses a 30-day month so the target stays
+  // comparable across ranges.
+  const wholeMonth = fromDt.getUTCDate() === 1 &&
+                     fromDt.getUTCMonth() === toDt.getUTCMonth() &&
+                     fromDt.getUTCFullYear() === toDt.getUTCFullYear();
+  const daysInMonth = wholeMonth
+    ? new Date(Date.UTC(fromDt.getUTCFullYear(), fromDt.getUTCMonth() + 1, 0)).getUTCDate()
+    : 30;
+
+  const targetHours = monthlyHours * periodDays / daysInMonth;
+  const targetJpy = monthlyJpy * periodDays / daysInMonth;
+  const actualHours = F.kpi.total_ai_duration_hours || 0;
+  const actualUsd = F.kpi.total_cost || 0;
+  const actualJpy = actualUsd * usdToJpy;
+
+  // Progress is judged against how much of the period has actually elapsed,
+  // so a range that ends in the future is not reported as "behind".
+  const todayStr = goalsUtcDay(new Date());
+  const effectiveTo = todayStr < to ? todayStr : to;
+  const elapsedDays = Math.max(1,
+    Math.floor((new Date(effectiveTo + 'T00:00:00Z') - fromDt) / 86400000) + 1);
+  const elapsedRatio = elapsedDays / periodDays;
+
+  const meta = document.getElementById('vcGoalsMeta');
+  if (meta) {
+    meta.textContent = elapsedDays + '/' + periodDays + 'd · ' +
+      Math.round(elapsedRatio * 100) + '%';
+  }
+
+  function statusOf(ratio) {
+    if (ratio < elapsedRatio * 0.8) return {cls: 'behind', label: L.behind || 'Behind'};
+    if (ratio < elapsedRatio * 1.2) return {cls: 'ontrack', label: L.on_track || 'On Track'};
+    return {cls: 'ahead', label: L.ahead || 'Ahead'};
+  }
+
+  function card(title, actual, target, ratio, dailyAvg, remaining, projected) {
+    const st = statusOf(ratio);
+    const pct = Math.round(ratio * 100);
+    return '<div class="goals-card">' +
+      '<div class="goals-card-label">' + escHtml(title) + '</div>' +
+      '<div class="goals-card-value">' + escHtml(actual) + '</div>' +
+      '<div class="goals-card-target">' + escHtml(L.target || 'Target') + ': ' + escHtml(target) + '</div>' +
+      '<div class="goals-bar ' + st.cls + '"><span style="width:' + Math.min(pct, 100) + '%"></span></div>' +
+      '<div class="goals-status">' + pct + '% · ' + escHtml(st.label) + '</div>' +
+      '<dl class="goals-breakdown">' +
+        '<div><dt>' + escHtml(L.daily_avg || 'Daily Avg') + '</dt><dd>' + escHtml(dailyAvg) + '</dd></div>' +
+        '<div><dt>' + escHtml(L.remaining || 'Remaining') + '</dt><dd>' + escHtml(remaining) + '</dd></div>' +
+        '<div><dt>' + escHtml(L.projected || 'Projected') + '</dt><dd>' + escHtml(projected) + '</dd></div>' +
+      '</dl></div>';
+  }
+
+  const hourRatio = targetHours > 0 ? actualHours / targetHours : 0;
+  const costRatio = targetJpy > 0 ? actualJpy / targetJpy : 0;
+  const avgHours = actualHours / elapsedDays;
+  const avgJpy = actualJpy / elapsedDays;
+  grid.innerHTML =
+    card(L.ai_duration || 'AI Working Time',
+         actualHours.toFixed(1) + 'h', targetHours.toFixed(0) + 'h', hourRatio,
+         avgHours.toFixed(1) + 'h',
+         Math.max(0, targetHours - actualHours).toFixed(1) + 'h',
+         (avgHours * periodDays).toFixed(1) + 'h') +
+    card(L.token_cost || 'Token Cost',
+         fmtJpy(actualJpy), fmtJpy(targetJpy), costRatio,
+         fmtJpy(avgJpy), fmtJpy(Math.max(0, targetJpy - actualJpy)),
+         fmtJpy(avgJpy * periodDays) + ' (' + fmtUSD(actualUsd) + ')');
+
+  // ── Charts ───────────────────────────────────────────────────────────
+  const durColor = vcColor(0);
+  const costColor = vcColor(1);
+  const targetColor = _vcLiveVar('--vc-neg', vcColor(2));
+  const minutesByDay = goalsDailyMinutes(F.sessions);
+  const days = F.daily_costs.map(d => d.date);
+  const dayHours = days.map(d => Math.round((minutesByDay[d] || 0) / 60 * 100) / 100);
+  const dayJpy = days.map((d, i) => (F.daily_costs[i].total || 0) * usdToJpy);
+  const dayTargetHours = targetHours / periodDays;
+  const dayTargetJpy = targetJpy / periodDays;
+
+  function barWithTarget(canvasId, labels, values, target, seriesLabel, color, axisTitle) {
+    const el = document.getElementById(canvasId);
+    if (!el) return null;
+    return new Chart(el, {
+      type: 'bar',
+      data: {labels: labels, datasets: [
+        {label: seriesLabel, data: values, backgroundColor: _vcHexRgba(color, 0.82), borderRadius: 4},
+        {label: L.target_line || 'Target', data: labels.map(() => target), type: 'line',
+         borderColor: targetColor, borderDash: [5, 5], pointRadius: 0, borderWidth: 2, fill: false},
+      ]},
+      options: {responsive: true, maintainAspectRatio: false,
+        scales: {x: scaleDefaults.x,
+                 y: {...scaleDefaults.y, title: {display: true, text: axisTitle}}}},
+    });
+  }
+
+  charts.goalsDailyDur = barWithTarget('chartGoalsDailyDuration', days, dayHours,
+    dayTargetHours, L.ai_duration || 'AI Working Time', durColor, 'h');
+  charts.goalsDailyCost = barWithTarget('chartGoalsDailyCost', days, dayJpy.map(Math.round),
+    dayTargetJpy, L.token_cost || 'Token Cost', costColor, '¥');
+
+  const weekHours = {}, weekJpy = {};
+  days.forEach((d, i) => {
+    const w = goalsIsoWeek(d);
+    weekHours[w] = (weekHours[w] || 0) + dayHours[i];
+    weekJpy[w] = (weekJpy[w] || 0) + dayJpy[i];
+  });
+  const weeks = Object.keys(weekHours).sort();
+  charts.goalsWeekDur = barWithTarget('chartGoalsWeeklyDuration', weeks,
+    weeks.map(w => Math.round(weekHours[w] * 100) / 100), dayTargetHours * 7,
+    L.ai_duration || 'AI Working Time', durColor, 'h');
+  charts.goalsWeekCost = barWithTarget('chartGoalsWeeklyCost', weeks,
+    weeks.map(w => Math.round(weekJpy[w])), dayTargetJpy * 7,
+    L.token_cost || 'Token Cost', costColor, '¥');
+
+  let cumHours = 0, cumJpy = 0;
+  const trendHours = [], trendJpy = [], planHours = [], planJpy = [];
+  days.forEach((d, i) => {
+    cumHours += dayHours[i];
+    cumJpy += dayJpy[i];
+    trendHours.push(Math.round(cumHours * 100) / 100);
+    trendJpy.push(Math.round(cumJpy));
+    planHours.push(Math.round(targetHours * (i + 1) / periodDays * 100) / 100);
+    planJpy.push(Math.round(targetJpy * (i + 1) / periodDays));
+  });
+  const trendEl = document.getElementById('chartGoalsMonthlyTrend');
+  if (trendEl) {
+    charts.goalsTrend = new Chart(trendEl, {
+      type: 'line',
+      data: {labels: days, datasets: [
+        {label: L.ai_duration || 'AI Working Time', data: trendHours, borderColor: durColor,
+         backgroundColor: _vcHexRgba(durColor, 0.1), fill: true, tension: 0.3, pointRadius: 2, yAxisID: 'y'},
+        {label: (L.target_line || 'Target') + ' (h)', data: planHours, borderColor: durColor,
+         borderDash: [5, 5], pointRadius: 0, borderWidth: 2, fill: false, yAxisID: 'y'},
+        {label: L.token_cost || 'Token Cost', data: trendJpy, borderColor: costColor,
+         backgroundColor: _vcHexRgba(costColor, 0.1), fill: true, tension: 0.3, pointRadius: 2, yAxisID: 'y1'},
+        {label: (L.target_line || 'Target') + ' (¥)', data: planJpy, borderColor: costColor,
+         borderDash: [5, 5], pointRadius: 0, borderWidth: 2, fill: false, yAxisID: 'y1'},
+      ]},
+      options: {responsive: true, maintainAspectRatio: false,
+        scales: {x: scaleDefaults.x,
+                 y: {...scaleDefaults.y, position: 'left', title: {display: true, text: 'h'}},
+                 y1: {...scaleDefaults.y, position: 'right', title: {display: true, text: '¥'},
+                      grid: {drawOnChartArea: false}}}},
+    });
+  }
+}
+
 // ── Tabs ───────────────────────────────────────────────────────────────
 const TAB_NAMES = [
   {id:'costs', label:D.locale.tabs.costs},
@@ -900,6 +1113,7 @@ const TAB_NAMES = [
   {id:'activity', label:D.locale.tabs.activity},
   {id:'sessions', label:D.locale.tabs.sessions},
   {id:'insights', label:D.locale.tabs.insights},
+  {id:'goals', label:D.locale.tabs.goals},
 ];
 
 function initTabs() {
@@ -2908,6 +3122,7 @@ document.getElementById('projectFilter').addEventListener('input', function() {
 });
 initTabs();
 renderKPI();
+renderGoals();
 renderCosts();
 renderActivity();
 renderProjects();

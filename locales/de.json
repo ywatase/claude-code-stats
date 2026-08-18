@@ -48,7 +48,8 @@
     "activity": "Aktivit\u00e4t & Projekte",
     "sessions": "Sessions",
     "plan": "Plan & Abrechnung",
-    "insights": "Insights & System"
+    "insights": "Insights & System",
+    "goals": "KPI-Ziele"
   },
   "costs": {
     "daily_cost": "API-Wert pro Tag nach Modell",
@@ -430,5 +431,22 @@
     "cancelled_note": "abgebrochen",
     "cancelled_note_suffix": "(zählen nicht als Fehler)",
     "no_tasks": "Keine Tasks gefunden"
+  },
+  "goals": {
+    "ai_duration": "KI-Arbeitszeit",
+    "token_cost": "Token-Kosten",
+    "target": "Ziel",
+    "daily_avg": "Tagesschnitt",
+    "remaining": "Verbleibend",
+    "projected": "Hochrechnung",
+    "daily_duration": "T\u00e4gliche KI-Dauer (Stunden)",
+    "daily_cost": "T\u00e4gliche Token-Kosten",
+    "weekly_duration": "W\u00f6chentliche KI-Dauer (Stunden)",
+    "weekly_cost": "W\u00f6chentliche Token-Kosten",
+    "monthly_trend": "Monatlicher Fortschrittsverlauf",
+    "target_line": "Ziel",
+    "on_track": "Im Plan",
+    "behind": "Im R\u00fcckstand",
+    "ahead": "\u00dcber Plan"
   }
 }

@@ -1563,3 +1563,30 @@ body { background:var(--bg); color:var(--text); font-size:14px; }
 @media (max-width: 640px) { .ph-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; } }
 .model-pricing-notice { margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--amber); border-radius: 3px; color: var(--text); font-size: 13px; background: rgba(176, 74, 47, 0.08); }
 .model-pricing-notice strong { font-weight: 600; }
+
+/* ================================================================
+   KPI Goals tab (fork-only).
+   Colors go through the legacy token names, which .vc / body.vc-page
+   remap to the theme-aware --vc-* values, so the cards follow the
+   light/dark switch without a rebuild.
+================================================================ */
+.goals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.goals-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+.goals-card-label { color: var(--text2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.goals-card-value { font-size: 28px; font-weight: 700; color: var(--text); }
+.goals-card-target { margin: 8px 0; color: var(--text2); font-size: 12px; }
+.goals-bar { background: var(--bg3); border-radius: 6px; height: 10px; overflow: hidden; margin-bottom: 8px; }
+.goals-bar > span { display: block; height: 100%; border-radius: 6px; }
+.goals-bar.behind > span { background: var(--red); }
+.goals-bar.ontrack > span { background: var(--amber); }
+.goals-bar.ahead > span { background: var(--green); }
+.goals-status { color: var(--text2); font-size: 12px; }
+.goals-breakdown { margin: 12px 0 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-size: 12px; }
+.goals-breakdown > div { min-width: 0; }
+.goals-breakdown dt { color: var(--text2); }
+.goals-breakdown dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .goals-grid { grid-template-columns: 1fr; }
+  .goals-breakdown { grid-template-columns: 1fr; gap: 4px; }
+}
