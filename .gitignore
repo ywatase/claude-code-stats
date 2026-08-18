@@ -22,6 +22,8 @@ update_dashboard.log
 # Internal documentation and planning
 docs/*.md
 docs/plans/
+# ...but the fork-maintenance notes are tracked on purpose.
+!docs/fork-notes.md
 
 # Backup copies of ~/.claude data
 dot-claude/
