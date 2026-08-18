@@ -1205,12 +1205,22 @@ def extract_session_messages(session_id, project_dir_name):
     return messages
 
 
+def _embed_json(obj, **dumps_kwargs):
+    """Serialize obj for embedding directly inside an inline <script> block.
+
+    Why not escape only "</": text carrying both "<!--" and "<script" (common
+    in pasted HTML captured by tool errors) drives the HTML tokenizer into the
+    script-data-double-escaped state, where "</script>" no longer closes the
+    tag. Escaping every "<" removes the whole class of breakage, and "\\u003c"
+    is valid in both JSON and JS string literals so the decoded value is
+    unchanged.
+    """
+    return json.dumps(obj, ensure_ascii=False, **dumps_kwargs).replace("<", "\\u003c")
+
+
 def generate_dashboard(data):
     """Generate self-contained HTML dashboard with embedded data."""
-    data_json = json.dumps(data, ensure_ascii=False)
-    # Same </script>-in-string protection as session pages: avoid premature
-    # script-tag close when any embedded text contains "</...".
-    data_json_inline = data_json.replace("</", "<\\/")
+    data_json_inline = _embed_json(data)
 
     if TEMPLATE_HTML.exists():
         with open(TEMPLATE_HTML, "r", encoding="utf-8") as f:
@@ -1307,8 +1317,8 @@ def _font_face_css():
 def _locale_script_tag():
     """Inline the locale as window.__LOCALE__ so bundled page/component JS
     can resolve UI strings at runtime. Must be emitted BEFORE the JS bundle.
-    "</" is escaped so no embedded string can close the script tag early."""
-    locale_json = json.dumps(LOCALE, ensure_ascii=False).replace("</", "<\\/")
+    "<" is escaped so no embedded string can close the script tag early."""
+    locale_json = _embed_json(LOCALE)
     return f"<script>window.__LOCALE__ = {locale_json};</script>"
 
 
@@ -1501,20 +1511,17 @@ def generate_session_pages(sessions, session_list):
 
         flow_data = build_session_flow(messages)
 
-        session_json = json.dumps({
+        # Embedded inside <script>...</script>: any "<" in message text (pasted
+        # HTML, discussed inline scripts) can terminate the block early. See
+        # _embed_json() for why "</"-only escaping is not enough.
+        session_json = _embed_json({
             "session": sess_data,
             "messages": messages,
-        }, ensure_ascii=False)
-        # Embedded inside <script>...</script>: a literal "</script>" inside any
-        # message text (e.g. when the user pastes HTML / discusses inline scripts)
-        # would close the script tag prematurely and break the page. Escape the
-        # boundary case; "<\/" is equivalent to "</" inside a JS string literal.
-        session_json = session_json.replace("</", "<\\/")
+        })
 
         html = _get_session_html_template()
         html = html.replace('"__SESSION_DATA__"', session_json)
-        flow_json = json.dumps(flow_data, ensure_ascii=False, separators=(',', ':'))
-        flow_json = flow_json.replace("</", "<\\/")
+        flow_json = _embed_json(flow_data, separators=(',', ':'))
         html = html.replace('"__FLOW_DATA__"', flow_json)
         html = html.replace('__VERSION__', VERSION)
         body_classes = "flow-hidden" if CONFIG.get("hide_session_flow", False) else ""
@@ -1634,7 +1641,8 @@ def generate_project_pages(session_list, data=None):
         slug = re.sub(r'[^a-zA-Z0-9_-]', '_', proj_name.replace('/', '_'))
         slug_map[proj_name] = slug
 
-        project_json = json.dumps({
+        # Upstream embedded this page's data unescaped. See _embed_json().
+        project_json = _embed_json({
             "name": proj_name,
             "sessions": proj_sessions,
             "stats": {
@@ -1651,7 +1659,7 @@ def generate_project_pages(session_list, data=None):
             "agent_types": dict(sorted(proj_agent_types.items(), key=lambda x: -x[1])),
             "git_ops": {"commits": proj_commits, "pushes": proj_pushes, "prs": proj_prs},
             "error_count": proj_errors,
-        }, ensure_ascii=False)
+        })
 
         html = _get_project_html_template()
         html = html.replace('"__PROJECT_DATA__"', project_json)
