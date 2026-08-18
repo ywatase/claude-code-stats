@@ -122,6 +122,58 @@ def _day_from_ms(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
+# Idle cutoff: a user who walks away mid-turn should not inflate AI time.
+_AI_TURN_MAX_MS = 30 * 60 * 1000
+
+
+def calc_ai_turn_duration(typed_timestamps):
+    """Sum user -> assistant round-trip time from (msg_type, ts_ms) pairs.
+
+    A turn opens on the most recent user prompt and closes on the next
+    assistant entry. Turns of zero/negative length (out-of-order timestamps in
+    merged transcripts) and turns at or beyond the idle cutoff are dropped.
+
+    Subagent turns are deliberately absent: _absorb_subagent() merges a
+    subagent's token buckets into its parent but not its timestamps, and the
+    parent is blocked for the whole subagent run, so its own turn already
+    covers that wall time.
+    """
+    total_ms = 0
+    last_user_ts = None
+
+    for msg_type, ts in typed_timestamps:
+        if msg_type == "user":
+            last_user_ts = ts
+        elif msg_type == "assistant" and last_user_ts is not None:
+            turn_ms = ts - last_user_ts
+            if 0 < turn_ms < _AI_TURN_MAX_MS:
+                total_ms += turn_ms
+            last_user_ts = None
+
+    return total_ms
+
+
+def calc_ai_turn_duration_by_day(typed_timestamps):
+    """Same as calc_ai_turn_duration, bucketed by the day the turn started.
+
+    A turn is attributed to its prompt's day, matching daily_message_count, so
+    a turn that crosses midnight does not split across two buckets.
+    """
+    by_day = defaultdict(int)
+    last_user_ts = None
+
+    for msg_type, ts in typed_timestamps:
+        if msg_type == "user":
+            last_user_ts = ts
+        elif msg_type == "assistant" and last_user_ts is not None:
+            turn_ms = ts - last_user_ts
+            if 0 < turn_ms < _AI_TURN_MAX_MS:
+                by_day[_day_from_ms(last_user_ts)] += turn_ms
+            last_user_ts = None
+
+    return dict(by_day)
+
+
 def split_session_by_day(daily_models, model_totals,
                          daily_message_count, total_message_count,
                          start_day):
@@ -296,6 +348,7 @@ def absorb_file(sessions, meta, parsed_objs):
                     "errors_by_source": defaultdict(int),
                     "limit_event_candidates": [],
                     "user_timestamps": [],  # private: user-prompt ts_ms only, dropped before serialization
+                    "typed_timestamps": [],  # private: (msg_type, ts_ms) for AI turn duration
                     "file_ops": [],
                     "git_ops": [],
                 }
@@ -339,6 +392,11 @@ def absorb_file(sessions, meta, parsed_objs):
                     ts_ms_for_msg = int(timestamp)
                     if _ts_counts_for_duration:
                         sess["timestamps"].append(ts_ms_for_msg)
+
+            # Ordered (type, ts) pairs feed AI turn duration, which needs the
+            # user -> assistant sequence that "timestamps" alone loses.
+            if ts_ms_for_msg is not None and _ts_counts_for_duration:
+                sess["typed_timestamps"].append((msg_type, ts_ms_for_msg))
 
             # API-error messages flagged by Claude Code itself.
             # This is the canonical channel for real user-plan
@@ -683,6 +741,9 @@ def finalize_sessions(sessions):
         sess["cache_nogap_flush_count"] = flushes["nogap_flushes"]
         sess["cache_nogap_rewrite_tokens"] = flushes["nogap_rewrite_tokens"]
         sess["idle_gap_summary"] = _compute_idle_gap_summary(turns)
+        _tt = sess.get("typed_timestamps", [])
+        sess["ai_turn_duration_ms"] = calc_ai_turn_duration(_tt)
+        sess["ai_turn_duration_ms_by_day"] = calc_ai_turn_duration_by_day(_tt)
         ctx_window = summarize_context_window(turns)
         sess["peak_context_tokens"] = ctx_window["peak_context_tokens"]
         sess["used_1m_context"] = ctx_window["used_1m_context"]

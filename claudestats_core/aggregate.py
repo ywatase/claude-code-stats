@@ -157,6 +157,8 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
                 session_per_day[_day] = {
                     "messages": per_day_messages.get(_day, 0),
                     "models": _models_out,
+                    "ai_duration_min": round(
+                        sess.get("ai_turn_duration_ms_by_day", {}).get(_day, 0) / 60000, 1),
                 }
 
         total_cost += session_cost
@@ -198,6 +200,7 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
             "start": start_dt.isoformat(),
             "end": end_dt.isoformat(),
             "duration_min": round(duration_s / 60, 1),
+            "ai_duration_min": round(sess.get("ai_turn_duration_ms", 0) / 60000, 1),
             "cost": round(session_cost, 4),
             "messages": sess["message_count"],
             "user_messages": sess["user_message_count"],
@@ -589,6 +592,8 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
             "first_session": all_dates[0] if all_dates else "",
             "last_session": all_dates[-1] if all_dates else "",
             "total_projects": len(project_list),
+            "total_ai_duration_hours": round(
+                sum(x["ai_duration_min"] for x in session_list) / 60, 2),
         },
         "plan": plan_analysis,
         "plan_recommendation": plan_recommendation,
