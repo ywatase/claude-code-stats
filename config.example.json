@@ -34,5 +34,10 @@
     "claude_dir_name": ".claude-windows",
     "dot_claude_json_name": ".claude-windows.json"
   },
-  "additional_sources": []
+  "additional_sources": [],
+  "kpi_targets": {
+    "monthly_ai_duration_hours": 160,
+    "monthly_cost_jpy": 100000,
+    "usd_to_jpy": 150
+  }
 }

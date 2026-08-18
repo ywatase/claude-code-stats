@@ -595,6 +595,7 @@ def build_dashboard_data(sessions, stats_cache, dot_claude, history,
             "total_ai_duration_hours": round(
                 sum(x["ai_duration_min"] for x in session_list) / 60, 2),
         },
+        "kpi_targets": dict(settings.KPI_TARGETS),
         "plan": plan_analysis,
         "plan_recommendation": plan_recommendation,
         "daily_costs": daily_cost_series,

@@ -20,10 +20,29 @@ SOURCE_LABEL = "current"
 LOCALE = {}
 DISPLAY_NAME = None
 
+# Fork-only: monthly goals the KPI Goals tab measures against.
+_KPI_TARGET_DEFAULTS = {
+    "monthly_ai_duration_hours": 160,
+    "monthly_cost_jpy": 100000,
+    "usd_to_jpy": 150,
+}
+KPI_TARGETS = dict(_KPI_TARGET_DEFAULTS)
+
 _KNOWN = {
     "WEEK_ANCHOR", "PLAN_HISTORY", "PLAN_CAPACITY_OVERRIDE_PRO_USD",
     "CACHE_EFF_MIN_MESSAGES", "SOURCE_LABEL", "LOCALE", "DISPLAY_NAME",
+    "KPI_TARGETS",
 }
+
+
+def normalize_kpi_targets(raw):
+    """Fill missing KPI target keys with defaults and drop unknown ones.
+
+    Returns a fresh dict: configure() stores references, so handing out the
+    defaults object would let one caller mutate it for every later one.
+    """
+    raw = raw or {}
+    return {k: raw.get(k, v) for k, v in _KPI_TARGET_DEFAULTS.items()}
 
 
 def configure(**kwargs):

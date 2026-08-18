@@ -254,6 +254,7 @@ _core_settings.configure(
     source_label=SOURCE_LABEL,
     locale=LOCALE,
     display_name=CONFIG.get("display_name"),
+    kpi_targets=_core_settings.normalize_kpi_targets(CONFIG.get("kpi_targets")),
 )
 
 
